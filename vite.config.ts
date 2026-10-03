@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import os from 'node:os';
+import pkg from './package.json';
 
 /**
  * Reachable from tailnet devices.
@@ -47,19 +48,37 @@ const allowedHosts: (string | RegExp)[] = [
   ...(process.env.TAILSCALE_ALLOWED_HOSTS === 'all' ? ([true] as unknown as (string | RegExp)[]) : []),
 ];
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: '0.0.0.0',
-    port: 5173,
-    strictPort: true,
-    allowedHosts,
-  },
-  preview: {
-    host: '0.0.0.0',
-    port: 4173,
-    strictPort: true,
-    allowedHosts,
-  },
-  build: { target: 'es2020', chunkSizeWarningLimit: 2400 },
+export default defineConfig(({ command, isPreview }) => {
+  /**
+   * Base path, so the same build works when served from a subdirectory.
+   *
+   * GitHub Pages project sites live at https://<owner>.github.io/<repo>/, not at
+   * the domain root. With `base: '/'` the built index.html asks for
+   * `/assets/index-xxx.js` and every page load 404s. The repo name is taken from
+   * GITHUB_REPOSITORY in CI and from package.json otherwise, so it stays correct
+   * if the repo is renamed.
+   *
+   * The dev server keeps base '/' so http://localhost:5173/ still works.
+   */
+  const isDevServer = command === 'serve' && !isPreview;
+  const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1] || pkg.name;
+  const base = process.env.BASE_PATH || (isDevServer ? '/' : `/${repoName}/`);
+
+  return {
+    base,
+    plugins: [react()],
+    server: {
+      host: '0.0.0.0',
+      port: 5173,
+      strictPort: true,
+      allowedHosts,
+    },
+    preview: {
+      host: '0.0.0.0',
+      port: 4173,
+      strictPort: true,
+      allowedHosts,
+    },
+    build: { target: 'es2020', chunkSizeWarningLimit: 2400 },
+  };
 });

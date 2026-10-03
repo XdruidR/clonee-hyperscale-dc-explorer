@@ -151,6 +151,85 @@ finished. Includes the simulated scenarios: pull the utility, fail a generator, 
 
 ---
 
+## Deploying to GitHub Pages
+
+Yes — the app is a purely static single-page app with no server component, no API calls and no third-party
+runtime requests (no fetch, XHR, WebSocket, beacon or tracking pixel; the only URLs in the bundle are the
+document links in the research appendix, which are rendered as ordinary links). It will run unchanged on
+GitHub Pages at:
+
+```
+https://xdruidr.github.io/hyperscale-dc-explorer/
+```
+
+### The one thing that breaks by default
+
+A GitHub Pages *project* site is served from a subdirectory, not the domain root. With Vite's default
+`base: '/'`, the built `index.html` requests `/assets/index-xxx.js` and every load 404s on a white page.
+`vite.config.ts` therefore derives the base path automatically:
+
+```
+base = BASE_PATH, else '/' + (GITHUB_REPOSITORY's repo name, else package.json name) + '/'
+```
+
+It is applied to `build` and `preview` but **not** to the dev server, so `http://localhost:5173/` still works.
+The repo name is read from `GITHUB_REPOSITORY` in CI and from `package.json` locally, so renaming the repo or
+forking it does not require a code change. Set `BASE_PATH` explicitly to override.
+
+### Enabling it
+
+`.github/workflows/pages.yml` builds and publishes on every push to `main`. It runs the typecheck and the
+data-model self test *before* building, so a broken tree is never published. To turn it on:
+
+**In the GitHub UI** — repo → Settings → Pages → Source: **GitHub Actions** → save. The first push to `main`
+after that publishes the site.
+
+**Or from the CLI** (needs the repo to be public first, see below):
+
+```bash
+gh api --method POST repos/XdruidR/hyperscale-dc-explorer/pages \
+  -f build_type=workflow
+# check status
+gh api repos/XdruidR/hyperscale-dc-explorer/pages
+```
+
+### Visibility — read this before switching the repo public
+
+GitHub Pages project sites are reachable by **anyone on the internet**. Per GitHub's documentation, that is
+true *even if the source repository is private*, where the plan allows private Pages. On GitHub Free the
+repository must be public; on paid plans a private repo can publish, but the published site is still public.
+
+Making this repository public therefore exposes:
+
+- `RESEARCH.md` and `src/data/sources.ts`, which name the real Southland project and its consultants so the
+  provenance is accurate. Those names come from publicly available consent documents, but they would become
+  attributable to your account. Remove or generalise those two files first if that matters to you.
+- `prompt0.txt`, the original brief. Harmless, but you may prefer to delete or gitignore it.
+
+The application itself is already clean: no company names outside the source register, no credentials, no
+proprietary assets.
+
+### Verifying locally before you publish
+
+`npm run preview` now serves the production build at the same subdirectory Pages uses, so it is a faithful
+rehearsal:
+
+```bash
+npm run build
+npm run preview
+# then open http://localhost:4173/hyperscale-dc-explorer/
+```
+
+`npm run smoke` also mounts `dist/` under that subdirectory rather than the server root, so if a future change
+regresses the bundle to root-absolute asset URLs, the browser suite fails instead of the live site going blank.
+
+If you would rather publish from a branch than from Actions, add an empty `.nojekyll` file at the top level of
+the publishing folder, otherwise GitHub Pages runs the content through Jekyll.
+
+Sizes are a non-issue: the published bundle is ~1.26 MB (359 kB gzipped) against a 1 GB site limit.
+
+---
+
 ## Architecture
 
 ```

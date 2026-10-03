@@ -33,9 +33,24 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.map': 'application/json',
 };
+/**
+ * Serve dist/ under a subdirectory, the way GitHub Pages serves a project site
+ * (https://<owner>.github.io/<repo>/). Mounting at a base path means this suite
+ * fails if the build ever regresses to root-absolute asset URLs, which is the
+ * single most common way a Vite app breaks on Pages.
+ */
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+const REPO = process.env.GITHUB_REPOSITORY?.split('/')[1] || pkg.name;
+const BASE = `/${REPO}/`;
+
 const server = createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
-  const file = url === '/' ? 'dist/index.html' : `dist${url}`;
+  if (url !== BASE && !url.startsWith(BASE)) {
+    res.writeHead(404).end('not found');
+    return;
+  }
+  const rel = url.slice(BASE.length);
+  const file = `dist/${rel === '' ? 'index.html' : rel}`;
   try {
     const body = readFileSync(file);
     const ext = file.slice(file.lastIndexOf('.'));
@@ -144,6 +159,7 @@ async function evaluate(expression) {
 }
 
 const steps = [];
+console.log(`serving dist/ at ${BASE} (project-site layout)`);
 async function step(name, fn) {
   process.stdout.write(`- ${name} ... `);
   try {
@@ -162,7 +178,7 @@ async function step(name, fn) {
 /* ------------------------------------------------------------------- the run */
 
 await step('load application', async () => {
-  await S('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  await S('Page.navigate', { url: `http://127.0.0.1:${PORT}${BASE}` });
   await sleep(3500);
   const title = await evaluate('document.title');
   if (!title.includes('Hyperscale')) throw new Error(`unexpected title: ${title}`);
