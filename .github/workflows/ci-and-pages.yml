@@ -1,0 +1,66 @@
+name: Verify and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Also publish to GitHub Pages (only works once Pages is enabled for this repo)'
+        type: boolean
+        default: false
+
+# Least privilege. The id-token grant is only needed by the deploy job.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Always runs: typecheck, data-model self test, and a production build.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx tsc -b --force
+      - run: npm run selftest
+
+      # BASE_PATH is derived from GITHUB_REPOSITORY by vite.config.ts, so the
+      # bundle is prefixed for https://<owner>.github.io/<repo>/.
+      - run: npm run build
+
+  # Publishing is opt-in. Pages is not enabled on this repository, and
+  # actions/configure-pages fails hard when it is not, so the packaging and
+  # deploy steps only run on a manual dispatch that asks for them. That keeps
+  # pushes green while Pages is off, and publishing stays a deliberate action.
+  package:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: package
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy == true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

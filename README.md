@@ -223,6 +223,9 @@ npm run preview
 `npm run smoke` also mounts `dist/` under that subdirectory rather than the server root, so if a future change
 regresses the bundle to root-absolute asset URLs, the browser suite fails instead of the live site going blank.
 
+Nothing is published at the moment: the repository is private, Pages is not enabled, and the workflow's deploy
+steps are gated on a manual dispatch.
+
 If you would rather publish from a branch than from Actions, add an empty `.nojekyll` file at the top level of
 the publishing folder, otherwise GitHub Pages runs the content through Jekyll.
 
