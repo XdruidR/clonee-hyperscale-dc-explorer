@@ -9,7 +9,10 @@
  * SYNTHETIC    - Invented placeholder used to demonstrate a delivery concept
  *                (costs, dates, names). Never presented as a project fact.
  */
-export type Classification = 'PUBLIC FACT' | 'TYPICAL' | 'SIMPLIFIED' | 'SYNTHETIC';
+import type { Classification } from './types';
+import { derived, fmt, waterIntensitySentence } from './calculations';
+
+export type { Classification };
 
 export const CLASSIFICATION_COLORS: Record<Classification, string> = {
   'PUBLIC FACT': '#41d98a',
@@ -234,18 +237,18 @@ export const FACTS: Fact[] = [
   {
     id: 'derived-wue',
     label: 'Derived: water per unit of compute',
-    value: '~0.14 kg water per kWh of IT load (~0.57 kg per kWh of heat rejected)',
+    value: `${fmt(derived.waterM3PerMwhIt, 3)} m3/MWh (${fmt(derived.waterKgPerKwhIt, 3)} kg/kWh)`,
     classification: 'SIMPLIFIED',
     sources: ['ES-CIVILS'],
-    note: 'Arithmetic on public inputs: 288,000 m3/yr divided by 240 MW x 8,760 h. Shown to make the balance legible, not to replace a water model.',
+    note: `Arithmetic on public inputs: ${fmt(288000)} m3/yr of demand divided by 240 MW x 8,760 h. ${waterIntensitySentence()} Shown to make the balance legible, not to replace a water model.`,
   },
   {
     id: 'derived-gen-margin',
     label: 'Derived: generation margin',
-    value: '84 x 3.2 MW = 268.8 MW rated against up to 240 MW IT',
+    value: `${fmt(derived.generationRatedMW, 1)} MW rated (84 x 3.2 MW) against ${fmt(240)} MW IT - a ratio of ${fmt(derived.generationVsIt, 2)}x`,
     classification: 'SIMPLIFIED',
     sources: ['ES-RC-DECISION'],
-    note: 'Roughly 1.1x on IT alone, and close to 1.0x once mechanical and electrical auxiliaries are added. This is exactly why priority-based load shedding exists in the emergency sequence.',
+    note: 'Roughly 1.1x on IT alone, and close to 1.0x once mechanical and electrical auxiliaries are added. This is exactly why priority-based load shedding exists in the emergency sequence, and why generation is modelled as an alternate source with its own bus rather than as spare capacity on the utility feed.',
   },
   {
     id: 'typical-uts',

@@ -25,8 +25,29 @@ import { CX_STAGES, CX_ORDER } from '../src/data/commissioning';
 import { FAULT_SCENARIOS, GRID_FAILURE_SEQUENCE } from '../src/data/faults';
 import { FACTS, FACT_BY_ID } from '../src/data/facts';
 import { SOURCES } from '../src/data/sources';
-import { buildStateOf, blockersFor, canStartStage } from '../src/state/store';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+import {
+  buildStateOf,
+  laggedPhase,
+  modulePhaseOffset,
+  modulesReady,
+  canStartStage,
+  blockersForPackage,
+  nextStageForPackage,
+  componentCxStatus,
+  packageDone,
+  outstandingPackages,
+} from '../src/state/store';
+import { TURNOVER_PACKAGES, PACKAGE_BY_ID, packagesContaining } from '../src/data/turnover';
+import { derived, INPUTS, waterIntensitySentence } from '../src/data/calculations';
+import { supplyFromSequenceStep, supplyState, SUPPLY_ASSUMPTIONS } from '../src/data/supply';
+import { RACK_ARCHETYPES, chainFor, NETWORK_LAYERS } from '../src/data/archetypes';
+import { toClaim } from '../src/data/types';
 import { WATER_BALANCE } from '../src/data/water';
+
+const cxStageIndex = (id: string) => CX_ORDER.indexOf(id);
 
 let failures = 0;
 let checks = 0;
@@ -181,12 +202,106 @@ for (const c of COMPONENTS) {
 ok(!canStartStage('install-check', noneDone), 'install check should not be startable before the factory test');
 const afterFactory = ['design-review', 'factory-test'];
 ok(canStartStage('install-check', afterFactory), 'install check should be startable once the factory test is done');
-const rackBlockers = blockersFor('M1-W.rack', 'functional-test', afterFactory);
-ok(rackBlockers.length > 0, 'a rack should be blocked from functional testing with nothing else commissioned');
+const emptyCx: Record<string, string[]> = {};
+const itPkg = 'M1-W.IT';
+const itBlockers = blockersForPackage(emptyCx, itPkg);
+ok(itBlockers.length > 0, 'a hall IT turnover package should be blocked with nothing commissioned');
 ok(
-  rackBlockers.some((b) => /ups|lv|bus|pdu|sub/i.test(b.component + b.message)),
-  `rack blockers should reference upstream electrical equipment, got: ${rackBlockers.map((b) => b.message).join(' | ')}`,
+  itBlockers.some((b) => /power train|cooling distribution|network fabric/.test(b.message)),
+  `IT blockers should reference upstream turnover packages, got: ${itBlockers.map((b) => b.message).join(' | ')}`,
 );
+
+/* turnover packages must be internally consistent */
+for (const p of TURNOVER_PACKAGES) {
+  ok(p.scope.length > 0 || p.id === 'SITE.FIRE', `turnover package ${p.id} has no scope`);
+  for (const c of p.scope) ok(!!COMPONENT_BY_ID[c], `turnover package ${p.id} scopes unknown component ${c}`);
+  for (const r of p.requires) ok(!!PACKAGE_BY_ID[r], `turnover package ${p.id} requires unknown package ${r}`);
+  ok(!p.requires.includes(p.id), `turnover package ${p.id} requires itself`);
+  const seen = new Set<string>();
+  for (const st of p.stages) {
+    ok(!!CX_STAGES.find((s) => s.id === st), `turnover package ${p.id} lists unknown stage ${st}`);
+    ok(!seen.has(st), `turnover package ${p.id} repeats stage ${st}`);
+    seen.add(st);
+  }
+}
+/* an IT package cannot be signed off while its upstream packages are not */
+{
+  const cx: Record<string, string[]> = {};
+  const itStages = PACKAGE_BY_ID['M1-W.IT'].stages;
+  for (const st of itStages) cx['M1-W.IT'] = [...(cx['M1-W.IT'] ?? []), st];
+  ok(
+    blockersForPackage(cx, 'M1-W.IT').length > 0,
+    'signing off every IT stage must still be blocked by the upstream packages',
+  );
+  /* satisfy the whole upstream chain and it should clear */
+  for (const id of ['GXP', 'M1.PWR', 'M1.GEN', 'M1.COOL', 'SITE.NET', 'M1-W.PWR', 'M1-W.NET', 'M1-W.COOL']) {
+    cx[id] = [...PACKAGE_BY_ID[id].stages];
+  }
+  ok(
+    blockersForPackage(cx, 'M1-W.IT').length === 0,
+    `IT package should be unblocked once every upstream package is signed off, got: ${blockersForPackage(cx, 'M1-W.IT').map((b) => b.message).join(' | ')}`,
+  );
+}
+/* component commissioning status is derived from its package AND the packages it
+   depends on, not from a global stage flag */
+{
+  const cx: Record<string, string[]> = {};
+  const completeClosure = (pkgId: string) => {
+    const seen = new Set<string>();
+    const walk = (id: string) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      for (const r of PACKAGE_BY_ID[id].requires) walk(r);
+      cx[id] = [...PACKAGE_BY_ID[id].stages];
+    };
+    walk(pkgId);
+  };
+
+  ok(componentCxStatus(cx, 'M1-W.rack').status === 'not-started', 'a rack should be not-started initially');
+  ok(componentCxStatus(cx, 'M1-W.upsA').status === 'not-started', 'a UPS should be not-started initially');
+
+  /* sign off the power package only: a UPS still cannot be accepted, because its
+     package depends on the module MV switchgear and the generation block */
+  cx['M1-W.PWR'] = [...PACKAGE_BY_ID['M1-W.PWR'].stages];
+  ok(
+    componentCxStatus(cx, 'M1-W.upsA').status === 'in-progress',
+    'a UPS whose own package is signed off but whose upstream packages are not must be in-progress, not complete',
+  );
+  ok(
+    componentCxStatus(cx, 'M1-W.upsA').blocking.length > 0,
+    'the UPS must report its unsigned upstream packages as blockers',
+  );
+  ok(
+    componentCxStatus(cx, 'M1-W.rack').status !== 'complete',
+    'a rack must NOT complete when only its power package is signed off',
+  );
+  ok(
+    componentCxStatus(cx, 'M1-W.rack').packages.length > 1,
+    'a rack status must span its own package plus the packages it depends on',
+  );
+
+  completeClosure('M1-W.IT');
+  ok(
+    componentCxStatus(cx, 'M1-W.rack').status === 'complete',
+    `completing the IT package and its full upstream closure should complete the rack, got ${componentCxStatus(cx, 'M1-W.rack').status}`,
+  );
+  ok(
+    componentCxStatus(cx, 'M1-W.gpu').status === 'complete',
+    'an accelerator in the same package should complete with it',
+  );
+  ok(
+    componentCxStatus(cx, 'M2-W.rack').status !== 'complete',
+    'completing hall 1 must not complete hall 2 - turnover packages are hall-scoped',
+  );
+  ok(
+    componentCxStatus(cx, 'M2-W.gpu').status !== 'complete',
+    'completing hall 1 must not complete hall 2 accelerators',
+  );
+  ok(outstandingPackages(cx).length > 0, 'the site as a whole is still not fully commissioned');
+}
+ok(packagesContaining('M1-W.rack').length === 1, 'a rack should sit in exactly one turnover package');
+ok(packagesContaining('M1.mv').length === 1, 'an MV lineup should sit in exactly one turnover package');
+ok(packagesContaining('M1-W.upsA').length === 1, 'a UPS should sit in exactly one turnover package');
 
 /* --------------------------------------------------------- construction time */
 section('construction programme');
@@ -208,6 +323,47 @@ ok(
     buildStateOf(COMPONENT_BY_ID['M3-W.rack'], 33).state !== 'complete',
   'module 1 should be operational before module 3',
 );
+/* there must be exactly one module-lag model in the source tree */
+{
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(f.name)) {
+        const src = readFileSync(p, 'utf8');
+        // any hardcoded (module - 1) * n lag, or a second MODULE_SHIFT table
+        if (/\(module\s*-\s*1\)\s*\*/.test(src)) offenders.push(`${p}: duplicate module lag expression`);
+        if (/MODULE_SHIFT\s*[:=]/.test(src) && !p.endsWith('state/store.ts')) offenders.push(`${p}: second MODULE_SHIFT`);
+        if (/modulesLive/.test(src)) offenders.push(`${p}: leftover modulesLive timeline`);
+      }
+    }
+  };
+  walk('src');
+  ok(offenders.length === 0, `duplicate construction-timeline models found: ${offenders.join('; ')}`);
+  ok(modulePhaseOffset(1) === 0 && modulePhaseOffset(2) > 0 && modulePhaseOffset(3) > modulePhaseOffset(2),
+    'module lag must increase with module number');
+  ok(laggedPhase(29, 3) <= PHASES.length - 1, 'module 3 fitout must land inside the programme');
+}
+
+/* module readiness must be monotonic and end with all modules handed over */
+{
+  const r1 = modulesReady(0, COMPONENTS);
+  const r35 = modulesReady(PHASES.length - 1, COMPONENTS);
+  ok(r1.every((r) => !r.live), 'no module should be live at phase 0');
+  ok(r35.every((r) => r.live && r.handedOver), 'all modules should be handed over at the end');
+  ok(
+    modulesReady(20, COMPONENTS).every((r) => !r.live),
+    'no module should be live before the fitout phase',
+  );
+  const mids = modulesReady(29, COMPONENTS);
+  ok(mids[0].live && !mids[2].live, 'module 1 should be live before module 3 - phased delivery');
+  ok(
+    r35.every((r) => r.componentsComplete === r.componentsTotal),
+    'every module component should be complete at handover',
+  );
+}
+
 /* the whole campus must actually finish inside the programme */
 for (const id of ['M1-W.rack', 'M2-W.rack', 'M3-W.rack', 'M3-E.gpu', 'M2-E.cdu', 'M3.cool', 'gxp.xfmr']) {
   ok(
@@ -280,6 +436,297 @@ const litresPerKWh = (288_000 * 1000) / (240 * 1000 * 8760);
 ok(litresPerKWh > 0.1 && litresPerKWh < 0.2, `derived water intensity should be ~0.14 L/kWh, got ${litresPerKWh}`);
 const roofArea = 6 * 74 * 110;
 ok(roofArea > 40_000, `modelled hall roof area ${roofArea} m2 should exceed the public ~30,000 m2 captured area`);
+
+/* ================================================================== SEMANTIC
+ * Tests from the review's section 10: these check the meaning of the model,
+ * not just that identifiers resolve.
+ * ====================================================================== */
+
+section('semantic: canonical calculations drive every displayed quantity');
+
+/* the canonical figures, recomputed independently here */
+{
+  const expectLPerKWh = (288_000 * 1000) / (INPUTS.itCapacityMW * 1000 * INPUTS.hoursPerYear);
+  ok(
+    Math.abs(derived.waterKgPerKwhIt - expectLPerKWh) < 1e-9,
+    `canonical water intensity drifted: ${derived.waterKgPerKwhIt} vs ${expectLPerKWh}`,
+  );
+  ok(
+    Math.abs(derived.waterKgPerKwhHeat - derived.waterKgPerKwhIt) < 1e-9,
+    'water per kWh of heat rejected must equal water per kWh of IT load, since all IT power becomes heat',
+  );
+  ok(
+    Math.abs(derived.waterM3PerMwhIt - derived.waterKgPerKwhIt) < 1e-9,
+    'm3/MWh and kg/kWh are numerically identical and must agree',
+  );
+  ok(Math.abs(derived.generationRatedMW - 268.8) < 0.01, 'generation rated MW drifted');
+  ok(Math.abs(derived.generationHeatMW - 445.2) < 0.01, 'generator heat MW drifted');
+  ok(waterIntensitySentence().includes('0.137'), 'the canonical sentence must contain the canonical figure');
+}
+
+/* No UI narrative may restate a derived quantity by hand. */
+{
+  const banned: [RegExp, string][] = [
+    [/0\.57\s*(kg|per kWh)/i, 'the superseded 0.57 kg/kWh figure'],
+    [/0\.137/, 'a hand-copied water intensity'],
+    [/roughly\s+1\s*m3\s+per\s+MWh/i, 'the superseded 1 m3/MWh narrative'],
+  ];
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (/\.(ts|tsx)$/.test(f.name) && !p.endsWith('calculations.ts') && !p.endsWith('selftest.ts')) {
+        const src = readFileSync(p, 'utf8');
+        for (const [re, why] of banned) if (re.test(src)) offenders.push(`${p}: ${why}`);
+      }
+    }
+  };
+  walk('src');
+  ok(offenders.length === 0, `narrative restates a derived number: ${offenders.join('; ')}`);
+}
+
+section('semantic: every operational source reaches its critical loads');
+{
+  /* generation must be a real source, not narrative */
+  const fromGen = (genId: string) => {
+    const seen = new Set<string>([genId]);
+    const queue = [genId];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      for (const lk of FLOW_LINKS) {
+        if (lk.from !== cur) continue;
+        if (!seen.has(lk.to)) {
+          seen.add(lk.to);
+          queue.push(lk.to);
+        }
+      }
+    }
+    return seen;
+  };
+  for (const h of HALLS) {
+    const reach = fromGen(`${h}.gen`);
+    ok(
+      reach.has(`${h}.gpu`),
+      `generation in ${h} has no electrical path to the accelerator in the same hall`,
+    );
+    const mod = h.slice(0, 2);
+    ok(reach.has(`${mod}.mv`), `generation in ${h} has no path to the campus MV / emergency bus`);
+    /* the GXP transformer is fed BY the grid, not by the generators: they are
+       alternative sources into the same bus, not a chain */
+    ok(
+      !reach.has('gxp.xfmr'),
+      `generation must not reach the GXP transformer in ${h}: grid and generation are alternate sources`,
+    );
+  }
+  /* and generation must be able to close onto the same bus the grid feeds */
+  const busFeeders = new Set(
+    FLOW_LINKS.filter((lk) => lk.medium === 'mv' && lk.to.endsWith('.mv')).map((lk) => lk.from),
+  );
+  ok(
+    [...busFeeders].some((f) => f.includes('xfmr')),
+    'no utility source reaches the campus MV bus',
+  );
+  ok(
+    [...busFeeders].some((f) => f.includes('gensw')),
+    'no generation source reaches the campus MV / emergency bus',
+  );
+  /* both sources must converge on the same bus, which is what makes the
+     utility-loss sequence an electrical state change rather than a narration */
+  for (const mod of MODULES) {
+    const feeders = FLOW_LINKS.filter((lk) => lk.medium === 'mv' && lk.to === `${mod.id}.mv`).map((lk) => lk.from);
+    ok(feeders.some((f) => f.includes('xfmr')), `${mod.id}.mv has no utility source`);
+    ok(feeders.some((f) => f.includes('gensw')), `${mod.id}.mv has no generation source`);
+  }
+}
+
+section('semantic: generator heat does not flow through the IT cooling loop');
+{
+  const genHeatLinks = FLOW_LINKS.filter((lk) => lk.from.endsWith('.genheat') || lk.from.endsWith('.gen'));
+  const intoItCooling = genHeatLinks.filter((lk) =>
+    ['.cool', '.hx', '.cdu', '.crah', '.res'].some((s) => lk.to.endsWith(s)),
+  );
+  ok(
+    intoItCooling.length === 0,
+    `generator heat must not flow into the IT cooling plant, found: ${intoItCooling.map((l) => `${l.from}->${l.to}`).join(', ')}`,
+  );
+  ok(
+    FLOW_LINKS.some((lk) => lk.from.endsWith('.genheat') && lk.to === 'site.ambient'),
+    'generator heat must be modelled as rejecting to ambient',
+  );
+  /* the two problems must be separately visible in the model */
+  ok(
+    !!COMPONENT_BY_ID['site.ambient'] && !!COMPONENT_BY_ID['M1-W.genheat'],
+    'both heat rejection problems need their own components in the model',
+  );
+}
+
+section('semantic: UPS energy behaves correctly through a utility loss');
+{
+  const base = { gridLost: false, generatorFault: false, transformerFailed: false, generationAvailable: false, secondsOnBattery: 0 };
+  const normal = supplyState(base);
+  ok(normal.carrying === 'utility', 'with the grid up the utility should carry the load');
+  ok(normal.batteryKwh === SUPPLY_ASSUMPTIONS.batteryKwh, 'batteries should be full on utility');
+
+  const lostNoGen = supplyState({ ...base, gridLost: true, secondsOnBattery: 60 });
+  ok(lostNoGen.carrying === 'battery', 'with the grid lost and no generation the UPS must carry the load');
+  ok(
+    lostNoGen.batteryKwh < normal.batteryKwh,
+    `UPS energy must decrease while on battery: ${lostNoGen.batteryKwh} vs ${normal.batteryKwh}`,
+  );
+  ok(lostNoGen.marginMw < 0, 'carrying on battery must show a capacity shortfall');
+  const lostLater = supplyState({ ...base, gridLost: true, secondsOnBattery: 120 });
+  ok(lostLater.batteryKwh < lostNoGen.batteryKwh, 'energy must keep falling as time on battery increases');
+
+  const fullAutonomy = (SUPPLY_ASSUMPTIONS.batteryKwh * 60) / INPUTS.itCapacityMW;
+  ok(
+    lostNoGen.autonomyMinutes < fullAutonomy,
+    'autonomy must shrink as the battery drains',
+  );
+  ok(
+    lostLater.autonomyMinutes < lostNoGen.autonomyMinutes,
+    'autonomy must keep shrinking with time on battery',
+  );
+
+  const lostWithGen = supplyState({ ...base, gridLost: true, generationAvailable: true, secondsOnBattery: 120 });
+  ok(lostWithGen.carrying === 'generation', 'generation should carry the load once synchronised');
+  ok(lostWithGen.batteryKwh === SUPPLY_ASSUMPTIONS.batteryKwh, 'batteries should be recharging on generation');
+  ok(lostWithGen.sources.generation === 'energised', 'the generation source should read energised');
+
+  const genFault = supplyState({ ...base, gridLost: true, generationAvailable: true, generatorFault: true });
+  ok(
+    genFault.generationCapacityMw < lostWithGen.generationCapacityMw,
+    'a generator failure must reduce available generation capacity',
+  );
+
+  const xfmrFault = supplyState({ ...base, transformerFailed: true });
+  ok(
+    xfmrFault.utilityCapacityMw < normal.utilityCapacityMw,
+    'a transformer failure must reduce utility import capacity',
+  );
+  ok(xfmrFault.marginMw < 0, 'losing a transformer must produce a shortfall the operator must act on');
+}
+
+section('semantic: the animation and the model cannot disagree');
+{
+  const inputs = supplyFromSequenceStep(1, []);
+  ok(inputs.gridLost, 'sequence step 1 must read as grid lost');
+  ok(!inputs.generationAvailable, 'sequence step 1 must not have generation available');
+  ok(supplyState(inputs).carrying === 'battery', 'step 1 must show the UPS carrying the load');
+  ok(supplyState(supplyFromSequenceStep(5, [])).carrying === 'generation', 'step 5 must show generation carrying');
+  ok(
+    supplyState(supplyFromSequenceStep(0, [])).carrying === 'utility',
+    'step 0 must show the utility carrying the load',
+  );
+  ok(
+    supplyState(supplyFromSequenceStep(8, [])).carrying === 'utility',
+    'step 8 must be back on the utility after restoration',
+  );
+}
+
+section('semantic: a commissioned rack requires its power and cooling systems');
+{
+  const cx: Record<string, string[]> = {};
+  const completeClosure = (pkgId: string) => {
+    const seen = new Set<string>();
+    const walk = (id: string) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      for (const r of PACKAGE_BY_ID[id].requires) walk(r);
+      cx[id] = [...PACKAGE_BY_ID[id].stages];
+    };
+    walk(pkgId);
+  };
+  completeClosure('M1-W.IT');
+  ok(componentCxStatus(cx, 'M1-W.rack').status === 'complete', 'full closure should complete the rack');
+  /* now delete the cooling package and it must stop being complete */
+  delete cx['M1-W.COOL'];
+  ok(
+    componentCxStatus(cx, 'M1-W.rack').status !== 'complete',
+    'removing the cooling package must stop the rack being commissioned',
+  );
+  ok(
+    componentCxStatus(cx, 'M1-W.rack').blocking.some((b) => /cooling distribution/i.test(b.message)),
+    'the blocker must name the cooling package',
+  );
+  delete cx['M1-W.PWR'];
+  ok(
+    componentCxStatus(cx, 'M1-W.rack').blocking.some((b) => /power train/i.test(b.message)),
+    'the blocker must name the power package',
+  );
+}
+
+section('semantic: every PUBLIC FACT statement carries a public source');
+{
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (/\.(ts|tsx)$/.test(f.name) && !p.endsWith('selftest.ts')) {
+        if (!p.endsWith('componentInfo.ts')) continue; // Claims live in the component registry
+        const src = readFileSync(p, 'utf8');
+        /* explicit Claim objects carry text + classification: PUBLIC FACT must list sources */
+        const re = /text:[\s\S]{0,400}?classification:\s*'PUBLIC FACT'[\s\S]{0,200}?\n\s*\}/g;
+        for (const m of src.matchAll(re)) {
+          if (!/sources:\s*\[/.test(m[0])) offenders.push(p);
+        }
+      }
+    }
+  };
+  walk('src');
+  ok(offenders.length === 0, `PUBLIC FACT claims without sources in: ${[...new Set(offenders)].join(', ')}`);
+
+  /* and the fact register must always cite */
+  for (const f of FACTS) ok(f.sources.length > 0, `fact ${f.id} has no source`);
+}
+
+section('semantic: rack archetypes and the calculation chain');
+{
+  ok(RACK_ARCHETYPES.length === 3, 'expected three rack archetypes');
+  for (const a of RACK_ARCHETYPES) {
+    const c = chainFor(a);
+    ok(c.racksTotal > 0, `archetype ${a.id} produced no racks`);
+    ok(
+      c.racksPerHall === Math.round(c.racksTotal / 6),
+      `archetype ${a.id}: racks per hall must be a sixth of the campus total`,
+    );
+    ok(
+      Math.abs(c.heatToRejectMw - INPUTS.itCapacityMW) < 1e-6,
+      `archetype ${a.id}: heat rejected must equal the IT load`,
+    );
+    ok(c.compressorLoadMw >= 0, `archetype ${a.id}: compressor load must be non-negative`);
+    ok(c.buswayCurrentPerRackA > 0, `archetype ${a.id}: busway current must be positive`);
+    ok(
+      Math.abs(c.coolingWaterM3Yr - INPUTS.coolingDemandM3Yr) / INPUTS.coolingDemandM3Yr < 0.25,
+      `archetype ${a.id}: water must stay near the published campus figure, got ${c.coolingWaterM3Yr}`,
+    );
+    ok(a.limitingFactors.length > 0, `archetype ${a.id} should say what limits it`);
+    ok(a.classification === 'TYPICAL', `archetype ${a.id} parameters are typical, not fact`);
+  }
+  /* denser racks must mean fewer racks, and more cooling plant */
+  const conv = chainFor(RACK_ARCHETYPES[0]);
+  const ai = chainFor(RACK_ARCHETYPES[2]);
+  ok(ai.racksTotal < conv.racksTotal, 'a denser archetype must need fewer racks');
+  ok(
+    ai.compressorLoadMw < conv.compressorLoadMw,
+    'a liquid-dominant archetype must imply less compressor load at the same IT load',
+  );
+  ok(
+    Math.abs(ai.heatToRejectMw - conv.heatToRejectMw) < 1e-6,
+    'heat rejected is a function of IT load, not of rack density',
+  );
+  ok(ai.networkPortsPerRack > conv.networkPortsPerRack, 'a denser archetype must imply more fabric ports');
+  ok(NETWORK_LAYERS.length >= 4, 'the network should be explained in layers');
+  ok(
+    NETWORK_LAYERS.some((l) => /east-west/i.test(l.name)),
+    'the east-west fabric must be called out as its own layer',
+  );
+  ok(
+    NETWORK_LAYERS.every((l) => l.limitingFactors.length > 0),
+    'every network layer should say what limits it',
+  );
+}
 
 /* -------------------------------------------------------------------- done */
 console.log(`\n${checks - failures}/${checks} checks passed`);

@@ -4,7 +4,7 @@ import { COMPONENTS, type CampusComponent } from '../data/campus';
 import { JOURNEYS } from '../data/journeys';
 import { COMPONENT_INFO } from '../data/componentInfo';
 import { PACKAGE_COLOR, SYSTEM_META } from '../data/types';
-import { buildStateOf, useStore, SYSTEM_FOR_MODE, type Mode } from '../state/store';
+import { buildStateOf, componentCxStatus, useStore, SYSTEM_FOR_MODE, type Mode } from '../state/store';
 import { Shape } from './builders';
 import { Label } from './Labels';
 
@@ -109,7 +109,7 @@ function Node({ c, showLabel }: { c: CampusComponent; showLabel: boolean }) {
   const isolateTrain = useStore((s) => s.isolateTrain);
   const selected = useStore((s) => s.selected);
   const journey = useStore((s) => s.journey);
-  const cxDone = useStore((s) => s.cxDone);
+  const cxState = useStore((s) => s.cx);
   const select = useStore((s) => s.select);
   const hover = useStore((s) => s.hover);
 
@@ -146,13 +146,20 @@ function Node({ c, showLabel }: { c: CampusComponent; showLabel: boolean }) {
     emissive = '#ff3b30';
   }
   if (mode === 'commissioning') {
-    const info = COMPONENT_INFO[c.type];
-    const stages = info?.cxStages ?? [];
-    if (stages.length) {
-      const complete = stages.every((s) => cxDone.includes(s));
-      colour = complete ? '#41d98a' : '#f2b13c';
-      emissive = complete ? '#0d3b23' : '#4a3200';
-      dim = Math.min(1, complete ? 1 : 0.75);
+    const st = componentCxStatus(cxState, c.id);
+    if (st.status === 'complete') {
+      colour = '#41d98a';
+      emissive = '#0d3b23';
+    } else if (st.status === 'in-progress') {
+      colour = '#f2b13c';
+      emissive = '#4a3200';
+    } else if (st.status === 'not-started') {
+      colour = '#8ea0b0';
+      emissive = undefined;
+      dim = Math.min(dim, 0.8);
+    } else {
+      colour = '#4a5563';
+      dim = Math.min(dim, 0.4);
     }
   }
 

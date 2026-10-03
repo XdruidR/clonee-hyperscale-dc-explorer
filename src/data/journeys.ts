@@ -1,4 +1,5 @@
 import type { SystemKey } from './types';
+import { waterIntensitySentence } from './calculations';
 
 export interface JourneyStep {
   title: string;
@@ -148,12 +149,12 @@ export const JOURNEYS: Journey[] = [
       },
       {
         title: 'And the heat',
-        body: 'Each set releases about 5.3 MW of heat — 445 MW across the fleet. A campus that is not selling a megawatt still needs a large heat rejection system, and it needs it to work while the engines are running.',
-        focus: ['M1-W.gen', 'M1.cool'],
-        look: ['M1.cool'],
+        body: 'Each set releases about 5.3 MW of heat - 445 MW across the fleet, nearly twice the IT load. But that heat does not go through the data centre cooling plant. Each set rejects it through its own radiators, jacket-water coolers, aftercoolers and exhaust, straight to ambient air. The campus has two separate heat rejection problems and it is easy to conflate them.',
+        focus: ['M1-W.gen', 'M1-W.genheat', 'site.ambient'],
+        look: ['M1-W.genheat'],
         mode: 'cooling',
-        camera: { pos: [-245, 130, -180], target: [-245, 8, -110] },
-        evidence: 'PUBLIC FACT: 5.3 MW heat per set, 445.2 MW total. This is why the cooling plant is sized for more than the IT load.',
+        camera: { pos: [-245, 95, -215], target: [-245, 6, -60] },
+        evidence: 'PUBLIC FACT: 5.3 MW heat per set, 445.2 MW total. TYPICAL: how that heat is actually rejected, and that it is independent of the IT cooling loop.',
       },
     ],
   },
@@ -316,7 +317,7 @@ export const JOURNEYS: Journey[] = [
         look: ['M1.cool'],
         mode: 'water',
         camera: { pos: [-245, 100, -220], target: [-245, 12, -118] },
-        evidence: 'SIMPLIFIED arithmetic: about 0.14 kg of water per kWh of IT load, or about 0.57 kg per kWh of heat rejected.',
+        evidence: `SIMPLIFIED arithmetic on published inputs: ${waterIntensitySentence()}`,
       },
       {
         title: 'Water treatment is a licence and a safety issue',
@@ -351,7 +352,7 @@ export const JOURNEYS: Journey[] = [
     title: 'What does a 240 MW data centre actually mean?',
     blurb: 'Separate IT load from total demand from rating from plan value.',
     classificationHint:
-      'PUBLIC FACT figures include 240 MW IT, 84 x 3,200 kWe generation and 445.2 MW of generator heat release. The module split in this model is SIMPLIFIED.',
+      'PUBLIC FACT figures include 240 MW IT, 84 x 3,200 kWe generation and 445.2 MW of generator heat release. The module split in this model is SIMPLIFIED. Generator heat is rejected by the generator cooling systems, not by the IT cooling plant.',
     steps: [
       {
         title: '240 MW is the IT load',
@@ -381,9 +382,9 @@ export const JOURNEYS: Journey[] = [
       },
       {
         title: 'Where the heat rejection capacity comes from',
-        body: 'Public fact: 5.3 MW of heat per generator, 445.2 MW across the fleet, before a single megawatt of IT load. The heat rejection plant has to be sized for the campus plus the standby plant, and it must work while the engines run.',
-        focus: ['M1-W.gen', 'M1.cool'],
-        look: ['M1-W.gen'],
+        body: 'Public fact: 5.3 MW of heat per generator, 445.2 MW across the fleet. The trap is assuming the IT cooling plant has to deal with it. It does not: the sets have their own radiators, jacket water, aftercoolers and exhaust. What the campus does need is for that engine heat to have somewhere to go - space, airflow and stack capacity - while the fleet runs.',
+        focus: ['M1-W.gen', 'M1-W.genheat', 'site.ambient'],
+        look: ['M1-W.genheat'],
         mode: 'cooling',
         camera: { pos: [-245, 170, 300], target: [-245, 8, 0] },
       },

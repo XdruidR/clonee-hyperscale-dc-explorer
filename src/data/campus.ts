@@ -121,6 +121,9 @@ const BUILD: Record<string, [number, number]> = {
   'adiabatic-cooler': [19, 19],
   'heat-exchanger': [20, 20],
   'heat-plume': [19, 19],
+  'gen-heat-rejection': [17, 17],
+  'generator-switchgear': [15, 17],
+  'ambient-sink': [0, 0],
   pump: [20, 20],
   reservoir: [10, 10],
   'water-treatment': [20, 21],
@@ -242,10 +245,14 @@ export const COMPONENTS: CampusComponent[] = (() => {
       module: mod.n,
       offsets: offsetsGrid(3, 2, 11, 9),
     });
-    add(`${mod.id}.mv`, 'mv-switchgear', `Module ${mod.n} MV switchgear`, 'power', [cx, 0, 0], [40, 6, 14], {
+    add(`${mod.id}.mv`, 'mv-switchgear', `Module ${mod.n} MV switchgear and emergency bus`, 'power', [cx, 0, -16], [40, 6, 14], {
       module: mod.n,
       label3d: true,
-      note: 'TYPICAL: dual incomer with split bus sections and per-hall feeders.',
+      note: 'TYPICAL: dual incomer with split bus sections and per-hall feeders. Modelled as the common bus that either the grid or the generation plant can supply.',
+    });
+    add(`${mod.id}.gensw`, 'generator-switchgear', `Generator switchgear and synchronising`, 'power', [cx, 0, 16], [22, 5, 8], {
+      module: mod.n,
+      label3d: true,
     });
     add(`${mod.id}.hx`, 'heat-exchanger', 'Heat exchanger skids', 'cooling', [cx, 0, 130], [10, 5, 16], {
       module: mod.n,
@@ -286,6 +293,13 @@ export const COMPONENTS: CampusComponent[] = (() => {
         facts: ['generators', 'generator-heat'],
         kW: 3.2 * 14,
         note: 'PUBLIC FACT: 84 sets of 3,200 kWe in six blocks of 14. TYPICAL: one block per hall, adjacent, inside the rectangle.',
+      });
+      add(`${hallId}.genheat`, 'gen-heat-rejection', `Engine heat rejection ${hn}`, 'cooling', [cx, 0, -62 * side], [8, 4.2, 10], {
+        ...common,
+        offsets: GEN_OFFSETS.map(([x, z]) => [x, z + 7] as [number, number]),
+        facts: ['generator-heat'],
+        label3d: true,
+        note: 'Radiators, jacket water and aftercoolers belonging to the sets themselves. PUBLIC FACT: 5.3 MW of heat per set. This heat does NOT go into the data centre cooling water loop - it leaves through the generator cooling systems to ambient air.',
       });
       add(`${hallId}.fuel`, 'fuel-tank', 'Fuel tanks and bunding', 'power', [cx, 0, -62 * side], [7, 3.4, 10], {
         ...common,
@@ -399,6 +413,10 @@ export const COMPONENTS: CampusComponent[] = (() => {
     label3d: true,
     facts: ['wetland'],
   });
+  add('site.ambient', 'ambient-sink', 'Atmosphere', 'cooling', [0, 130, 0], [60, 6, 60], {
+    label3d: true,
+    note: 'The common destination of both heat rejection problems: the IT cooling plant, which carries most of its energy away by evaporating water, and the generation plant radiators and exhaust, which reject to ambient air with little water involved. This is why the campus water balance is driven by IT cooling, not by the generators.',
+  });
   add(
     'site.bore',
     'bore',
@@ -495,6 +513,20 @@ export const FLOW_LINKS: FlowLink[] = (() => {
   let n = 0;
   const id = () => `f${n++}`;
 
+  /* generation: sets -> generator switchgear -> emergency bus, as an alternate source */
+  for (const hallId of MODULES.flatMap((m) => m.halls)) {
+    const m = hallId.slice(0, 2);
+    const cx = SITE.moduleCentres[Number(m[1]) - 1];
+    const side = hallId.endsWith('W') ? -1 : 1;
+    out.push(
+      l(id(), `${hallId}.gen`, `${m}.gensw`, 'power', 'mv', 'Generator output to generator switchgear', 'TYPICAL', {
+        via: [[cx, 2.5, -62 * side + 30 * side]],
+      }),
+    );
+    out.push(l(id(), `${hallId}.genheat`, 'site.ambient', 'cooling', 'air', 'Engine heat to ambient, via the sets own radiators and exhaust', 'TYPICAL'));
+    out.push(l(id(), `${hallId}.gen`, `${hallId}.genheat`, 'cooling', 'air', 'Engine heat to its own cooling systems', 'PUBLIC FACT'));
+  }
+
   /* incoming HV */
   out.push(l(id(), 'hv.line', 'gxp.bay', 'power', 'hv', 'Transmission into the grid exit point', 'PUBLIC FACT'));
   for (let i = 0; i < 3; i++) {
@@ -524,7 +556,10 @@ export const FLOW_LINKS: FlowLink[] = (() => {
         }),
       );
     }
+    out.push(l(id(), `${m}.gensw`, `${m}.mv`, 'power', 'mv', 'Emergency bus: generation closes onto the MV bus', 'TYPICAL'));
     out.push(l(id(), `${m}.hx`, `${m}.cool`, 'cooling', 'chilled', 'Warm water to heat rejection', 'TYPICAL'));
+    out.push(l(id(), `${m}.cool`, 'site.ambient', 'cooling', 'air', 'IT cooling heat to ambient', 'TYPICAL'));
+    out.push(l(id(), `${m}.plume`, 'site.ambient', 'water', 'drain', 'Evaporated water vapour to atmosphere', 'PUBLIC FACT'));
     out.push(l(id(), `${m}.cool`, `${m}.plume`, 'cooling', 'air', 'Heat and vapour rejected to atmosphere', 'PUBLIC FACT'));
 
     for (const hallId of mod.halls) {

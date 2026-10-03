@@ -656,3 +656,27 @@ hr.sep-h {
     width: 320px;
   }
 }
+ul.claims {
+  list-style: none;
+  padding-left: 0;
+}
+
+ul.claims li {
+  margin: 6px 0;
+  padding-left: 0;
+  line-height: 1.5;
+}
+
+.claim-chip {
+  display: inline-block;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 4px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: rgba(99, 179, 255, 0.18);
+  color: var(--typical);
+  border: 1px solid rgba(99, 179, 255, 0.4);
+  vertical-align: 1px;
+}

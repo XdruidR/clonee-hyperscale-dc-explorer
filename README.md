@@ -238,6 +238,7 @@ Sizes are a non-issue: the published bundle is ~1.26 MB (359 kB gzipped) against
 ```
 src/
   data/                  the whole content model, all of it declarative
+    calculations.ts      canonical inputs and every derived quantity, computed once
     sources.ts           source register (the only place project names appear)
     facts.ts             public fact register + derived arithmetic, each with sources
     types.ts             classification, system and package vocabularies
@@ -247,6 +248,9 @@ src/
     commissioning.ts     commissioning stages, scenarios, modular delivery notes
     faults.ts            utility-loss sequence, fault scenarios, redundancy vocabulary
     water.ts             water balance and capacity-claim reconciliation
+    turnover.ts          turnover packages: commissioning boundaries and dependencies
+    supply.ts            supply-state engine driven by the utility-loss sequence
+    archetypes.ts        rack archetypes, the IT MW -> fabric chain, and the network layers
     journeys.ts          10 guided journeys with camera and view state per step
   state/store.ts         zustand store, build-state model, commissioning gating
   three/                 R3F scene, geometry builders, flow renderer, camera rig
@@ -280,16 +284,52 @@ the campus would never complete. The self test asserts that every hall finishes 
 resilience modes remove the roof and cut the walls), because those stories are invisible through a closed roof.
 The user can always override with the toggles.
 
+### Correctness rules the model now enforces
+
+Three things that were previously only true in prose are now enforced by the model and checked by the test
+suite:
+
+- **One canonical calculation.** `data/calculations.ts` holds the published inputs and every derived quantity.
+  No panel, narrative string or fact register entry restates a derived number by hand, and a test fails if one
+  appears. Where the model needs an assumption it does not publish (UPS efficiency, auxiliary load, battery
+  energy) it lives in a declared `ASSUMPTIONS` table with its own classification.
+- **Commissioning is asset-specific.** Status belongs to turnover packages with real boundaries and `requires`
+  edges, not to a global stage list. A rack completes only when its own package *and the upstream packages it
+  depends on* are signed off, so "this rack cannot be commissioned because its cooling distribution package has
+  not completed leak detection" is a computed consequence.
+- **Failures change state.** The utility-loss sequence drives a supply-state engine that reports which sources are
+  energised, what is carrying the load, how much UPS energy remains and the priority-ordered shed that runs if
+  generation does not arrive. Generation and the grid are modelled as alternative sources into the same MV /
+  emergency bus, so losing one is an electrical state change rather than a narration.
+
+Also corrected, because both taught the wrong mental model:
+
+- **Generator heat is a separate problem.** About 445 MW of engine heat is rejected through the sets' own
+  radiators, jacket water, aftercoolers and exhaust, straight to ambient. It does not go through the data centre
+  cooling water loop. The model has a distinct generator heat rejection component and a distinct path to the
+  atmosphere, and a test fails if generator heat ever flows into the IT cooling plant.
+- **A spine failure is not automatically harmless.** Losing a spine reduces available east-west capacity unless
+  the fabric was designed with spare capacity, and collective traffic stalls rather than degrading.
+
 ### Verification
 
-`npm run selftest` checks the things that actually break in an app like this: that every component has
+`npm run selftest` runs about 3,800 assertions. It has two halves: referential integrity, and semantic tests that
+check the meaning of the model.
+
+Referential integrity covers the things that actually break in an app like this: that every component has
 metadata and a valid phase window, that halls do not overlap and match the public footprint figure, that the
 84 generators, 4 towers and 5 bores are where the public record puts them, that every flow link points at real
 components, that every hall is reachable for power, cooling, data and water, that commissioning stages are
 ordered, that a rack is blocked by its upstream equipment, that temporary works appear and disappear, that
 every journey and fault scenario references real components, that every citation resolves, and that the public
-arithmetic (268.8 MW of generation, 445.2 MW of generator heat, ~0.14 kg of water per kWh) is internally
-consistent.
+arithmetic (268.8 MW of generation, 445.2 MW of generator heat, ~0.137 m³/MWh of water) is internally consistent,
+and that there is only one module-lag model in the source tree.
+
+The semantic tests assert, among other things: every operational source has an electrical path to its critical
+loads; generator heat never flows into the IT cooling plant; UPS energy decreases while carrying the load on
+battery and recovers on generation; a commissioned rack cannot exist while its power or cooling packages are
+unsigned; every `PUBLIC FACT` statement carries a public source; and no UI narrative restates a derived number
+by hand.
 
 `npm run smoke` builds nothing itself — run `npm run build` first — then serves `dist/`, drives the real
 application in headless Chrome over the DevTools protocol, exercises all eight modes, the construction slider,

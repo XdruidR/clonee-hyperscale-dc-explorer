@@ -6,6 +6,8 @@
  * Anything not published is marked TYPICAL and worded as an assumption.
  */
 
+import { derived, fmt, waterIntensitySentence } from './calculations';
+
 export interface WaterRow {
   id: string;
   label: string;
@@ -130,18 +132,18 @@ export const WATER_BALANCE: WaterRow[] = [
   },
   {
     id: 'derived-wue',
-    label: 'Derived: water per kWh of IT load',
-    value: 0.137,
-    unit: 'kg/kWh of IT load',
+    label: 'Derived: water per unit of compute',
+    value: derived.waterM3PerMwhIt,
+    unit: 'm3 per MWh of IT load',
     kind: 'derived',
     classification: 'SIMPLIFIED',
-    note: 'SIMPLIFIED arithmetic: 288,000 m3/yr divided by 240 MW x 8,760 h. Equivalently about 0.57 kg of evaporated water per kWh of heat rejected. This is the headline number worth remembering: water is the heat rejection medium, so water per unit of compute is a design outcome, not an accident.',
+    note: `SIMPLIFIED arithmetic on published inputs: ${fmt(288000)} m3/yr of demand divided by 240 MW x 8,760 h. ${waterIntensitySentence()} This is the headline number worth remembering: water is the heat rejection medium, so water per unit of compute is a design outcome, not an accident.`,
     sources: ['ES-CIVILS'],
   },
   {
     id: 'derived-gap',
     label: 'Derived: shortfall covered by groundwater',
-    value: 213_000,
+    value: Math.round(derived.supplyGapM3Yr),
     unit: 'm3/yr',
     kind: 'derived',
     classification: 'SIMPLIFIED',
@@ -156,7 +158,7 @@ export const WATER_NARRATIVE: string[] = [
   'Where it goes: mostly into the air. The cooling plant is evaporative, so roughly the entire annual demand leaves as vapour. That is why the consent decision records that water vapour may be visible near the site in some conditions.',
   'What stays behind: the closed loop concentrates chemicals and solids, so blowdown is required even though the public documents do not quantify it.',
   'What the site gives back: about 157,000 m3/yr of treated stormwater recharged into the aquifer, deliberately, to hold up the groundwater that supports the wetland to the south.',
-  'The scale insight: cooling water use is roughly 1 m3 per MWh of IT load. Compare with potable water at about 2 m3 per day for the whole workforce — three orders of magnitude apart, in the same campus.',
+  `The scale insight: cooling water use is ${fmt(derived.waterM3PerMwhIt, 3)} m3 per MWh of IT load. Compare that with potable water at about 2 m3 per day for the whole workforce - a factor of roughly ${fmt(Math.round((derived.waterM3PerMwhIt * 40) / 2))} apart, in the same campus.`,
 ];
 
 /** Capacity explanation: why different published capacity numbers are not the same thing. */

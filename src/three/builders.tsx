@@ -456,6 +456,35 @@ export function Shape({
           <Solid size={[w + 1, 0.5, d + 1]} color="#8b97a4" opacity={opacity} y={h} {...P} />
         </group>
       );
+    case 'gen-heat-rejection':
+      return c.offsets ? (
+        <group>
+          <InstancedBoxes offsets={c.offsets} size={c.size} color="#b0532f" opacity={opacity} emissive="#2a0d04" />
+          {c.offsets.map(([x, z], i) => (
+            <group key={i} position={[x, 0, z]}>
+              <Cylinder r={0.45} h={9} color="#8d8f92" opacity={opacity * 0.9} y={3.4} x={-2.6} segments={8} />
+              <Solid size={[6, 1.2, 7]} color="#c96a3f" opacity={opacity * 0.18} y={3.4} z={-6} />
+            </group>
+          ))}
+        </group>
+      ) : null;
+    case 'generator-switchgear':
+      return (
+        <group>
+          <Solid size={[w, h, d]} color={color} opacity={opacity} highlight={highlight} {...P} />
+          {[-1, 0, 1].map((i) => (
+            <Solid key={i} size={[2.2, h * 1.15, 1.2]} color="#e7e2d3" opacity={opacity * 0.9} x={i * 5.5} y={0} {...P} />
+          ))}
+        </group>
+      );
+    case 'ambient-sink':
+      return (
+        <group>
+          <Solid size={[w, h * 0.35, d]} color="#7dd3fc" opacity={opacity * 0.16} y={0} {...P} />
+          <Solid size={[w * 0.72, h * 0.3, d * 0.72]} color="#a5d8f7" opacity={opacity * 0.1} y={h * 0.35} {...P} />
+          <Solid size={[w * 0.45, h * 0.3, d * 0.45]} color="#cfe6f7" opacity={opacity * 0.07} y={h * 0.65} {...P} />
+        </group>
+      );
     case 'gxp-platform':
       return (
         <group>

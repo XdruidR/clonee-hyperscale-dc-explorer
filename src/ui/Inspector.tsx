@@ -1,10 +1,11 @@
 import { buildStateOf, useStore, type BuildState } from '../state/store';
+import { toClaim } from '../data/types';
+import { componentCxStatus } from '../state/store';
 import { COMPONENT_BY_ID, HALL_INDEX } from '../data/campus';
 import { COMPONENT_INFO } from '../data/componentInfo';
 import { FACT_BY_ID } from '../data/facts';
 import { SYSTEM_META, PACKAGE_COLOR } from '../data/types';
 import { Badge, Cite, Section } from './common';
-import { CX_STAGES } from '../data/commissioning';
 import { PACKAGES } from '../data/types';
 
 function statusLabel(state: BuildState, progress: number) {
@@ -19,14 +20,16 @@ export function Inspector() {
   const select = useStore((s) => s.select);
   const deliveryLayer = useStore((s) => s.deliveryLayer);
   const setIsolateHall = useStore((s) => s.setIsolateHall);
-  const cxDone = useStore((s) => s.cxDone);
+  const cxState = useStore((s) => s.cx);
   const constructPhase = useStore((s) => s.constructPhase);
+  const evidenceMode = useStore((s) => s.evidenceMode);
 
   const id = selected ?? hovered;
   if (!id) return null;
   const c = COMPONENT_BY_ID[id];
   const info = COMPONENT_INFO[c?.type ?? ''];
   if (!c || !info) return null;
+  const cx = componentCxStatus(cxState, c.id);
 
   const hallId = c.hall ? Object.entries(HALL_INDEX).find(([, v]) => v === c.hall)?.[0] : undefined;
 
@@ -65,10 +68,33 @@ export function Inspector() {
       </Section>
 
       <Section title="Technical">
-        <ul>
-          {info.technical.map((t, i) => (
-            <li key={i}>{t}</li>
-          ))}
+        <ul className="claims">
+          {info.technical.map((entry, i) => {
+            const claim = toClaim(entry, info.provenance);
+            const mixed = info.technical.some((e) => typeof e !== 'string');
+            return (
+              <li key={i}>
+                {mixed && evidenceMode && (
+                  <span className="claim-chip" title={claim.classification}>
+                    {claim.classification === 'PUBLIC FACT'
+                      ? 'FACT'
+                      : claim.classification === 'TYPICAL'
+                        ? 'TYP'
+                        : claim.classification === 'SIMPLIFIED'
+                          ? 'SIMP'
+                          : 'SYN'}
+                  </span>
+                )}
+                <span>{claim.text}</span>
+                {evidenceMode && claim.sources && claim.sources.length > 0 && (
+                  <span className="tiny">
+                    {' '}
+                    <Cite ids={claim.sources} />
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
         {info.voltage && (
           <div className="tiny" style={{ marginTop: 6 }}>
@@ -158,11 +184,13 @@ export function Inspector() {
               <tr>
                 <th>Commissioning status</th>
                 <td>
-                  {info.cxStages.length === 0
-                    ? 'not in the commissioning scope'
-                    : `${info.cxStages.filter((s) => cxDone.includes(s)).length} of ${info.cxStages.length} tests complete${
-                        cxDone.includes(info.cxStages[info.cxStages.length - 1]) ? ' — commissioned' : ''
-                      }`}
+                  {cx.status === 'out-of-scope'
+                    ? 'not inside a turnover boundary'
+                    : cx.status === 'complete'
+                      ? `commissioned (${cx.packages.map((p) => `${p.id} ${p.done}/${p.total}`).join(', ')})`
+                      : cx.status === 'in-progress'
+                        ? `in progress (${cx.packages.map((p) => `${p.id} ${p.done}/${p.total}`).join(', ')})`
+                        : `not started (${cx.packages.map((p) => p.id).join(', ')})`}
                 </td>
               </tr>
               <tr>
@@ -177,21 +205,42 @@ export function Inspector() {
           </table>
       </Section>
 
-      {info.cxStages.length > 0 && (
-        <Section title="Commissioning tests">
-          <div className="tiny">
-            {info.cxStages.map((s) => {
-              const st = CX_STAGES.find((x) => x.id === s)!;
-              return (
-                <div key={s} style={{ marginBottom: 3 }}>
-                  <span style={{ color: cxDone.includes(s) ? 'var(--fact)' : 'var(--dim)' }}>
-                    {cxDone.includes(s) ? '■' : '□'}
-                  </span>{' '}
-                  {st.name} <span className="mono">[{st.level}]</span>
-                </div>
-              );
-            })}
-          </div>
+      {cx.packages.length > 0 && (
+        <Section title="Commissioning status (turnover packages)">
+          {cx.status === 'complete' ? (
+            <div className="callout fact">
+              All turnover packages containing this equipment are signed off.
+            </div>
+          ) : (
+            <table className="simple">
+              <thead>
+                <tr>
+                  <th>Turnover package</th>
+                  <th>Tests complete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cx.packages.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.title}</td>
+                    <td className="num">
+                      {p.done}/{p.total}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {cx.blocking.length > 0 && (
+            <div className="callout">
+              <b>Why this equipment is not yet commissioned:</b>
+              <ul style={{ margin: '4px 0 0' }}>
+                {cx.blocking.slice(0, 4).map((b, i) => (
+                  <li key={i}>{b.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Section>
       )}
 
@@ -220,6 +269,32 @@ export function Inspector() {
               </div>
             );
           })}
+        </Section>
+      )}
+
+      {info.interfaceRisk && info.interfaceRisk.length > 0 && (
+        <Section title="What interface usually causes trouble?">
+          <ul className="tiny">
+            {info.interfaceRisk.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {info.controlsTrack && info.controlsTrack.length > 0 && (
+        <Section title="What should project controls track?">
+          <ul className="tiny">
+            {info.controlsTrack.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {info.meetingQuestion && (
+        <Section title="What question should I ask in a meeting?">
+          <div className="callout blue">{info.meetingQuestion}</div>
         </Section>
       )}
 

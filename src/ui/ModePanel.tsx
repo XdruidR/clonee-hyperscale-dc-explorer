@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { COMPONENT_BY_ID, MODULES } from '../data/campus';
+import { COMPONENT_BY_ID } from '../data/campus';
 import { CAPACITY_CLAIMS, WATER_BALANCE, WATER_NARRATIVE } from '../data/water';
 import { GRID_FAILURE_SEQUENCE, FAULT_SCENARIOS, REDUNDANCY_CONCEPTS, SHED_PRIORITY } from '../data/faults';
 import { CX_SCENARIOS, CX_STAGES } from '../data/commissioning';
-import { blockersFor, canStartStage, stageName } from '../state/store';
-import { COMPONENT_INFO } from '../data/componentInfo';
+import {
+  blockersForPackage,
+  nextStageForPackage,
+  outstandingPackages,
+  packageDone,
+  stageName,
+} from '../state/store';
+import { TURNOVER_PACKAGES, PACKAGE_BY_ID } from '../data/turnover';
+import { NETWORK_LAYERS, RACK_ARCHETYPES, chainFor } from '../data/archetypes';
+import { fmt } from '../data/calculations';
+import { supplyFromSequenceStep, supplyState } from '../data/supply';
 import { PHASES, CUMULATIVE_MONTHS, TOTAL_MONTHS } from '../data/phases';
+import { COMPONENTS } from '../data/campus';
+import { modulesReady } from '../state/store';
 import { MODULAR_DELIVERY_NOTES } from '../data/commissioning';
 import { POWER_CHAIN, HEAT_CHAIN, FIBRE_CHAIN } from '../data/campus';
 import { CLASSIFICATION_MEANING, CLASSIFICATION_COLORS } from '../data/facts';
@@ -51,6 +62,113 @@ function Chain({ ids, labels }: { ids: string[]; labels: string[] }) {
 }
 
 /* ------------------------------------------------------------------ overview */
+
+function ArchetypePanel() {
+  const [id, setId] = useState('ai-rack-scale');
+  const chain = useMemo(() => chainFor(RACK_ARCHETYPES.find((a) => a.id === id) ?? RACK_ARCHETYPES[2]), [id]);
+  return (
+    <div>
+      <p className="lede">
+        There is no single universal rack power architecture, and a model that shows one teaches the wrong thing.
+        Pick an archetype and the whole chain recalculates from the published IT load.
+      </p>
+      {RACK_ARCHETYPES.map((a) => (
+        <button key={a.id} className={`row ${id === a.id ? 'on' : ''}`} onClick={() => setId(a.id)}>
+          <span>{id === a.id ? '◉' : '○'}</span>
+          <span>
+            {a.name}
+            <div className="tiny">{a.summary}</div>
+          </span>
+          <span className="tiny">
+            {a.rackDensityKw[0]}–{a.rackDensityKw[1]} kW
+          </span>
+        </button>
+      ))}
+
+      <div className="callout blue" style={{ marginTop: 8 }}>
+        <b>Recalculated from {fmt(240)} MW IT</b> <Badge c="SIMPLIFIED" />
+        <table className="simple" style={{ marginTop: 6 }}>
+          <tbody>
+            <tr>
+              <th>Rack density</th>
+              <td className="num">{fmt(chain.rackDensityKw, 0)} kW</td>
+            </tr>
+            <tr>
+              <th>Racks across the campus</th>
+              <td className="num">{num(chain.racksTotal)}</td>
+            </tr>
+            <tr>
+              <th>Racks per hall</th>
+              <td className="num">{num(chain.racksPerHall)}</td>
+            </tr>
+            <tr>
+              <th>Floor area per rack</th>
+              <td className="num">{fmt(chain.hallFloorPerRackM2, 1)} m²</td>
+            </tr>
+            <tr>
+              <th>Heat to liquid cooling</th>
+              <td className="num">{Math.round(chain.coolingToLiquidShare * 100)}%</td>
+            </tr>
+            <tr>
+              <th>Busway current per rack</th>
+              <td className="num">{Math.round(chain.buswayCurrentPerRackA)} A</td>
+            </tr>
+            <tr>
+              <th>Heat to reject</th>
+              <td className="num">{fmt(chain.heatToRejectMw, 0)} MW</td>
+            </tr>
+            <tr>
+              <th>Compressor load (air share)</th>
+              <td className="num">{fmt(chain.compressorLoadMw, 0)} MW</td>
+            </tr>
+            <tr>
+              <th>Cooling water</th>
+              <td className="num">{num(Math.round(chain.coolingWaterM3Yr))} m³/yr</td>
+            </tr>
+            <tr>
+              <th>Fabric ports per rack</th>
+              <td className="num">{chain.networkPortsPerRack}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="tiny" style={{ marginTop: 6 }}>
+          <b>Assumptions behind this chain</b> <Badge c="TYPICAL" />
+          <ul className="tiny" style={{ margin: '3px 0 0' }}>
+            {chain.assumptions.map((a, i) => (
+              <li key={i}>{a}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="callout">
+        <b>Power architecture.</b> {chain.archetype.rackPowerArchitecture}
+      </div>
+      <div className="callout blue">
+        <b>Cooling.</b> {chain.archetype.coolingMix}
+      </div>
+      <div className="callout blue">
+        <b>Distribution notes.</b>
+        <ul className="tiny" style={{ margin: '3px 0 0' }}>
+          {chain.archetype.distributionNotes.map((n, i) => (
+            <li key={i}>{n}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="callout blue">
+        <b>Fabric notes.</b>
+        <ul className="tiny" style={{ margin: '3px 0 0' }}>
+          {chain.archetype.fabricNotes.map((n, i) => (
+            <li key={i}>{n}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="callout danger">
+        <b>What usually limits this design:</b> {chain.archetype.limitingFactors.join('; ')}
+      </div>
+    </div>
+  );
+}
 
 function OverviewPanel() {
   return (
@@ -114,6 +232,10 @@ function OverviewPanel() {
         ))}
       </Section>
 
+      <Section title="Rack archetypes — the chain from IT MW to fabric">
+        <ArchetypePanel />
+      </Section>
+
       <Section title="How to use it">
         <ul>
           <li>Orbit, pan and zoom with the mouse; click anything to focus it and read it.</li>
@@ -147,6 +269,7 @@ function PowerPanel() {
   const startJourney = useStore((s) => s.startJourney);
   const g = GRID_FAILURE_SEQUENCE[gridPhase];
   const faults = useStore((s) => s.faults);
+  const state = supplyState(supplyFromSequenceStep(gridPhase, faults));
 
   useEffect(() => {
     if (!playing) return;
@@ -215,6 +338,45 @@ function PowerPanel() {
               <span>{p.name}</span>
             </div>
           ))}
+        </div>
+      </Section>
+
+      <Section title="Electrical state of the model right now">
+        <div className="grid2">
+          <Stat value={state.sources.grid} label={`grid source (${fmt(state.utilityCapacityMw, 0)} MW)`} />
+          <Stat value={state.sources.generation} label={`generation source (${fmt(state.generationCapacityMw, 0)} MW)`} />
+          <Stat value={state.carrying} label={`carrying ${fmt(state.totalLoadMw, 0)} MW`} />
+          <Stat
+            value={state.carrying === 'battery' ? `${Math.round(state.batteryKwh).toLocaleString('en-NZ')} kWh` : 'charging'}
+            label={`UPS ${state.carrying === 'battery' ? `${Math.round(state.autonomyMinutes)} min autonomy` : 'on utility/generation'}`}
+          />
+        </div>
+        <div className={`callout ${state.marginMw < 0 ? 'danger' : 'fact'}`} style={{ marginTop: 8 }}>
+          <b>Margin {state.marginMw >= 0 ? '+' : ''}{fmt(state.marginMw, 0)} MW</b>
+          {state.notes.length > 0 && (
+            <ul style={{ margin: '4px 0 0' }}>
+              {state.notes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          )}
+          {state.marginMw < 0 && (
+            <div className="tiny" style={{ marginTop: 4 }}>
+              <b>Shed order if generation does not arrive:</b>
+              <ol className="tiny" style={{ margin: '3px 0 0' }}>
+                {state.shed.map((a, i) => (
+                  <li key={i}>
+                    {a.action}
+                    {a.mw > 0 ? ` (~${a.mw} MW)` : ''} — {a.detail}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
+        <div className="tiny">
+          Capacity figures and the shed order are SYNTHETIC/TYPICAL. What is public is the fleet rating and the
+          1.1x ratio against IT load.
         </div>
       </Section>
 
@@ -344,11 +506,22 @@ function CoolingPanel() {
         </div>
       )}
 
-      <Section title="The generator problem">
+      <Section title="Two separate heat rejection problems">
         <FactNote c="PUBLIC FACT" ids={['ES-RC-DECISION']}>
-          84 sets release about 5.3 MW of heat each — roughly 445 MW in total. A campus that is selling nothing still
-          needs to reject heat, and it needs to reject it while the engines are running.
+          84 sets release about 5.3 MW of heat each — roughly 445 MW in total, which is nearly twice the IT load.
         </FactNote>
+        <div className="callout blue">
+          <b>The most common misconception here.</b> That engine heat does <b>not</b> go through the data centre
+          cooling water loop. Each set rejects it through its own radiators, jacket-water coolers, aftercoolers and
+          exhaust, straight to ambient air. The IT cooling plant and the generation plant are two independent heat
+          rejection systems. <Badge c="TYPICAL" />
+        </div>
+        <div className="callout">
+          <b>Why it matters in practice.</b> When the fleet runs through a long outage the space around the generators
+          gets hot, radiators can be starved of airflow by plant layout, and the generator hall needs its own
+          ventilation and stack capacity. Assuming the campus cooling plant covers this is an interface gap worth
+          finding before an outage rather than during one.
+        </div>
       </Section>
     </div>
   );
@@ -476,15 +649,43 @@ function DataPanel() {
         <ol style={{ paddingLeft: 16, lineHeight: 1.6 }}>
           <li>The request lands on the landing station and is handed to the campus core, where it is policed and routed.</li>
           <li>Core spines carry it to the leaf switches in the hall that hosts the target cluster.</li>
-          <li>The fabric is a Clos topology: every leaf reaches every spine, so a spine failure is not a capacity event.</li>
           <li>Top-of-rack switches deliver it to the servers over short optical links.</li>
-          <li>Storage serves the dataset — for a training run, mostly large sequential reads for checkpoints.</li>
-          <li>Across thousands of accelerators the fabric must move data fast enough not to starve the compute. Optics dominate both cost and failures here.</li>
+          <li>Storage serves the dataset. Note the two distinct patterns: a large initial read of training data, then periodic large sequential checkpoint writes. That is not the same as the continuous traffic inside a training step.</li>
+          <li>
+            Inside a training step the traffic that actually consumes the fabric is the <b>collectives</b> between
+            accelerators — all-reduce and its variants — thousands of times a second, and it behaves nothing like
+            storage traffic.
+          </li>
         </ol>
+        <div className="callout danger">
+          <b>Correcting a common overstatement.</b> A spine failure is <i>not</i> automatically a non-event. Unless
+          the fabric was deliberately designed with spare capacity, losing a spine reduces available east-west
+          bandwidth, and collective traffic does not degrade gracefully — it stalls. The question to ask is what
+          capacity is demonstrated with one spine out, at realistic collective patterns. <Badge c="TYPICAL" />
+        </div>
         <div className="callout blue">
           <b>TYPICAL.</b> The public record confirms connectivity exists at this scale and with international reach. It
           does not describe the internal fabric, and this application does not pretend otherwise.
         </div>
+      </Section>
+
+      <Section title="The network in layers">
+        <p className="lede">
+          The fibre geometry in 3D is only one of five layers, and it is the least interesting one. These are the
+          layers that actually constrain a facility.
+        </p>
+        {NETWORK_LAYERS.map((l) => (
+          <div key={l.id} className="callout blue">
+            <b>{l.name}</b> <Badge c={l.classification} />
+            <div className="tiny mono" style={{ margin: '3px 0' }}>
+              {l.path}
+            </div>
+            <div className="tiny">{l.purpose}</div>
+            <div className="tiny">
+              <b>Limited by:</b> {l.limitingFactors.join('; ')}
+            </div>
+          </div>
+        ))}
       </Section>
 
       <Section title="Three domains, deliberately separated">
@@ -612,6 +813,7 @@ function ConstructionPanel() {
   const setPhase = useStore((s) => s.setConstructPhase);
   const listRef = useRef<HTMLDivElement>(null);
   const current = PHASES[phase];
+  const ready = modulesReady(phase, COMPONENTS);
 
   useEffect(() => {
     const el = listRef.current?.querySelector('.phase-row.now');
@@ -652,11 +854,33 @@ function ConstructionPanel() {
 
       <Section title="Live status">
         <div className="grid2">
-          <Stat value={`${[0, 1, 2].filter((m) => modulesLive(phase, m)).length}`} label="modules live" />
+          <Stat value={`${ready.filter((r) => r.live).length}/3`} label="modules carrying IT load" />
           <Stat value={`~${CUMULATIVE_MONTHS[phase]} mo`} label="synthetic elapsed" />
+          <Stat value={`${ready.filter((r) => r.handedOver).length}/3`} label="modules handed over" />
           <Stat value={String(phase + 1)} label="phases started" />
-          <Stat value={`${MODULES.filter((m) => modulesLive(phase, m.n)).length}/3`} label="module zones active" />
         </div>
+        <table className="simple" style={{ marginTop: 8 }}>
+          <thead>
+            <tr>
+              <th>Module</th>
+              <th>IT energised</th>
+              <th>Handed over</th>
+              <th>Scope complete</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ready.map((r) => (
+              <tr key={r.module}>
+                <td>Module {r.module}</td>
+                <td className="num">{r.live ? `phase ${r.fitoutPhase}` : `phase ${r.fitoutPhase}`}</td>
+                <td className="num">{r.handedOver ? 'yes' : `phase ${r.readyPhase}`}</td>
+                <td className="num">
+                  {r.componentsComplete}/{r.componentsTotal}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <div className="tiny" style={{ marginTop: 8 }}>
           Modelling note: modules are offset by eight phases each so you can see that a hyperscale campus is not built
           all at once. Total programme length is SYNTHETIC and indicative.
@@ -701,112 +925,163 @@ function ConstructionPanel() {
   );
 }
 
-function modulesLive(phase: number, module: number) {
-  const shift = (module - 1) * 8;
-  const fitout = 21 + shift;
-  return phase >= fitout;
-}
-
 /* -------------------------------------------------------------- commissioning */
 
 function CommissioningPanel() {
-  const cxDone = useStore((s) => s.cxDone);
-  const completeStage = useStore((s) => s.completeStage);
+  const cxState = useStore((s) => s.cx);
+  const completePackageStage = useStore((s) => s.completePackageStage);
   const resetCx = useStore((s) => s.resetCx);
+  const [activePkg, setActivePkg] = useState<string>(TURNOVER_PACKAGES[0].id);
   const [openScenario, setOpenScenario] = useState<string | null>(null);
 
-  const next = CX_STAGES.find((s) => !cxDone.includes(s.id));
-  const blocked = next ? !canStartStage(next.id, cxDone) : false;
-
-  const rackBlockers = useMemo(() => blockersFor('M1-W.rack', next?.id ?? 'install-check', cxDone), [next, cxDone]);
+  const pkg = PACKAGE_BY_ID[activePkg];
+  const done = packageDone(cxState, activePkg);
+  const next = nextStageForPackage(cxState, activePkg);
+  const blockers = blockersForPackage(cxState, activePkg);
+  const outstanding = outstandingPackages(cxState);
+  const totalStages = TURNOVER_PACKAGES.reduce((a, p) => a + p.stages.length, 0);
+  const totalDone = Object.values(cxState).reduce((a, v) => a + v.length, 0);
 
   return (
     <div className="panel left scrolly">
-      <h2>Commissioning — proving it works before anyone buys it</h2>
+      <h2>Commissioning — turnover packages</h2>
       <p className="lede">
-        Data centre commissioning is not a formality. It is the only evidence that the design intent survives contact
-        with failure. Each level is a gate: sign it off before the next one starts.
+        Commissioning status belongs to systems and turnover boundaries, not to the site as a whole. A gate marked
+        &quot;functional test complete&quot; across the campus tells you nothing about whether one rack can be accepted.
+        What matters is whether the packages that contain its power, cooling, network and IT boundaries are signed
+        off, and whether the packages they depend on are.
       </p>
 
-      <Section title="Progression">
-        <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
-          <button
-            className="primary"
-            disabled={!next || blocked}
-            onClick={() => next && completeStage(next.id)}
-            title={blocked && next ? 'Upstream stages are incomplete' : ''}
-          >
-            {next ? `Complete: ${next.name}` : 'Programme complete'}
-          </button>
-          <button onClick={resetCx}>Reset</button>
-        </div>
-        {next && blocked && (
-          <div className="callout danger">
-            <b>Blocked.</b> {next.name} needs:{' '}
-            {next.needs
-              .filter((n) => !cxDone.includes(n))
-              .map((n) => CX_STAGES.find((s) => s.id === n)?.name)
-              .join(', ')}{' '}
-            still outstanding.
-          </div>
-        )}
-        {next && !blocked && (
-          <div className="callout fact">
-            <b>{next.level}</b> · {next.name}
-            <p className="lede" style={{ margin: '4px 0' }}>
-              {next.detail}
-            </p>
-            <div className="tiny">Evidence produced: {next.evidence}</div>
-            <div className="tiny">Indicative duration: ~{next.days} days (SYNTHETIC)</div>
-          </div>
-        )}
-      </Section>
+      <div className="grid2" style={{ margin: '8px 0' }}>
+        <Stat value={`${Object.keys(cxState).length}/${TURNOVER_PACKAGES.length}`} label="packages started" />
+        <Stat value={`${totalDone}/${totalStages}`} label="package tests signed off" />
+      </div>
 
-      <Section title="Dependency in action">
-        <div className="callout">
-          Try to commission a rack and the model answers with the real reason. Right now, for a representative rack in
-          hall 1 at the next stage:
+      <Section title="Turnover packages">
+        <div className="tiny" style={{ marginBottom: 6 }}>
+          Colour in the 3D view follows these: <span style={{ color: '#41d98a' }}>green</span> package signed
+          off, <span style={{ color: '#f2b13c' }}>amber</span> in progress,{' '}
+          <span style={{ color: '#8ea0b0' }}>grey</span> not started, dark grey outside any boundary.
         </div>
-        {rackBlockers.length ? (
-          rackBlockers.map((b, i) => {
-            const up = COMPONENT_BY_ID[b.component];
-            const upTitle = up ? COMPONENT_INFO[up.type]?.title ?? up.label : b.component;
-            return (
-              <div key={i} className="callout blue">
-                <b>
-                  You cannot commission this rack yet because {upTitle} has not completed {stageName(b.stage)}.
-                </b>
-                <div className="tiny" style={{ marginTop: 3 }}>
-                  That is the whole point of commissioning gates: you cannot commission downstream equipment until
-                  upstream equipment has proved its own sequence of operation. Component id <span className="mono">{b.component}</span>.
+        {TURNOVER_PACKAGES.map((p) => {
+          const d = packageDone(cxState, p.id).length;
+          const state = d === 0 ? 'not started' : d >= p.stages.length ? 'signed off' : 'in progress';
+          const blocked = blockersForPackage(cxState, p.id);
+          return (
+            <button
+              key={p.id}
+              className={`row ${activePkg === p.id ? 'on' : ''}`}
+              onClick={() => setActivePkg(p.id)}
+              title={p.note}
+            >
+              <span style={{ color: d >= p.stages.length ? '#41d98a' : d > 0 ? '#f2b13c' : '#8ea0b0' }}>
+                {d >= p.stages.length ? '■' : d > 0 ? '▣' : '□'}
+              </span>
+              <span>
+                {p.title}
+                <div className="tiny">
+                  {d}/{p.stages.length} {state}
+                  {blocked.length > 0 && ` · ${blocked.length} blocker${blocked.length > 1 ? 's' : ''}`}
                 </div>
-              </div>
-            );
-          })
-        ) : (
-          <div className="callout fact">Nothing is blocking this component at the next stage. It can proceed.</div>
-        )}
+              </span>
+              <span className="tiny mono">{p.id}</span>
+            </button>
+          );
+        })}
       </Section>
 
-      <Section title="Programme">
-        <div className="phase-list">
-          {CX_STAGES.map((s) => {
-            const done = cxDone.includes(s.id);
-            const isNext = next?.id === s.id;
-            return (
-              <div key={s.id} className={`phase-row ${isNext ? 'now' : ''} ${done ? 'done' : ''}`}>
-                <span className="phase-num">{done ? '■' : s.level}</span>
-                <span>{s.name}</span>
-              </div>
-            );
-          })}
+      {pkg && (
+        <Section title={`${pkg.title} — progression`}>
+          <div className="callout">
+            <b>Turnover boundary.</b> {pkg.boundary}
+          </div>
+          <div className="tiny" style={{ marginBottom: 6 }}>
+            {pkg.note}
+          </div>
+          {pkg.requires.length > 0 && (
+            <div className="tiny">
+              <b>Requires:</b>{' '}
+              {pkg.requires.map((r) => {
+                const rp = PACKAGE_BY_ID[r];
+                const rd = packageDone(cxState, r).length;
+                return (
+                  <span key={r} style={{ marginRight: 8 }}>
+                    {rp?.title ?? r}{' '}
+                    <span className="mono">
+                      ({rd}/{rp?.stages.length ?? 0})
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 5, margin: '8px 0' }}>
+            <button
+              className="primary"
+              disabled={!next || blockers.length > 0}
+              onClick={() => next && completePackageStage(activePkg, next)}
+              title={blockers.length ? 'Upstream or in-package prerequisites are outstanding' : ''}
+            >
+              {next ? `Complete: ${stageName(next)}` : 'Package signed off'}
+            </button>
+            <button onClick={resetCx}>Reset all</button>
+          </div>
+
+          {blockers.length > 0 ? (
+            <div className="callout danger">
+              <b>Blocked. This package cannot advance until:</b>
+              <ul style={{ margin: '4px 0 0' }}>
+                {blockers.map((b, i) => (
+                  <li key={i}>{b.message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : next ? (
+            <div className="callout fact">
+              <b>Ready.</b> {pkg.title}: {stageName(next)}
+              <p className="lede" style={{ margin: '4px 0' }}>
+                {CX_STAGES.find((st) => st.id === next)?.detail}
+              </p>
+              <div className="tiny">Evidence produced: {CX_STAGES.find((st) => st.id === next)?.evidence}</div>
+            </div>
+          ) : (
+            <div className="callout fact">
+              This turnover package is signed off. Everything inside its boundary can progress to IT readiness.
+            </div>
+          )}
+
+          <div className="phase-list" style={{ marginTop: 8 }}>
+            {pkg.stages.map((st) => {
+              const d = done.includes(st);
+              return (
+                <div key={st} className={`phase-row ${st === next && !blockers.length ? 'now' : ''} ${d ? 'done' : ''}`}>
+                  <span className="phase-num">{d ? '■' : ''}</span>
+                  <span>{stageName(st)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      <Section title="Why the hall IT package is usually the gate">
+        <p className="lede">
+          A hall IT package requires its power, cooling and network packages. In practice the cooling package is
+          often the last to close, because it needs the module heat rejection running at design conditions and leak
+          detection proved before IT load is accepted.
+        </p>
+        <div className="callout blue">
+          <b>Ready for Service</b> is not the same as commissioned. It is the point where every system inside the
+          turnover boundary is accepted, punch items are closed or formally accepted, and the operational
+          procedures are rehearsed by the people who will use them.
         </div>
       </Section>
 
       <Section title="Simulated scenarios">
         <p className="lede">
-          Each of these is an integrated systems testing script in disguise. In a real project the scripts are written
-          and approved before the test window opens, with hold points, abort criteria and witnesses named.
+          Each of these is an integrated systems testing script in disguise. In a real project the scripts are
+          written and approved before the test window opens, with hold points, abort criteria and witnesses named.
         </p>
         {CX_SCENARIOS.map((s) => (
           <div key={s.id} style={{ marginBottom: 6 }}>
@@ -841,8 +1116,9 @@ function CommissioningPanel() {
       </Section>
 
       <div className="callout">
-        Acceptance criteria and recovery times are project-specific and must come from the owner&apos;s requirements,
-        the basis of design and the agreed commissioning criteria. This application deliberately does not invent them.
+        Acceptance criteria and recovery times are project-specific and must come from the owner's requirements,
+        the basis of design and the agreed commissioning criteria. This application deliberately does not invent
+        them. {outstanding.length} packages remain outstanding.
       </div>
     </div>
   );

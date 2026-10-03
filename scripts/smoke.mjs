@@ -355,37 +355,61 @@ await step('power: run the utility failure animation', async () => {
   await shot('grid-failure');
 });
 
-await step('commissioning: progress and blocking', async () => {
+await step('commissioning: turnover package gating', async () => {
   await evaluate(`(() => {
     [...document.querySelectorAll('.tabs button')].find(x => x.textContent.trim() === 'COMMISSIONING').click();
     return true;
   })()`);
-  await sleep(400);
+  await sleep(500);
+  const txt = await evaluate(`document.querySelector('.panel.left').innerText`);
+  if (!/TURNOVER PACKAGES/i.test(txt)) throw new Error('the commissioning panel is not package based any more');
+  if (!/Grid exit point/i.test(txt)) throw new Error('expected the GXP turnover package to be listed');
+  if (!/Hall 1/.test(txt) || !/cooling distribution/i.test(txt))
+    throw new Error('expected hall-scoped turnover packages to be listed');
+
+  /* the hall IT package must be blocked by its upstream packages */
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.tabs button')].find(x => x.textContent.trim() === 'OVERVIEW');
+    const b = [...document.querySelectorAll('.panel.left button.row')].find(x => x.textContent.includes('IT fitout'));
+    b.click();
     return true;
   })()`);
-  const txt = await evaluate(`document.querySelector('.panel.left').innerText`);
-  if (!/You cannot commission this rack yet because .+ has not completed/.test(txt))
-    throw new Error(`commissioning dependency gating is not being demonstrated:\n${txt.slice(0, 400)}`);
+  await sleep(350);
+  const itTxt = await evaluate(`document.querySelector('.panel.left').innerText`);
+  if (!/Blocked/.test(itTxt)) throw new Error('the IT turnover package should start blocked');
+  if (!/cannot (advance|be signed off) because upstream turnover package/.test(itTxt))
+    throw new Error(`expected upstream-package dependency reasons, got:\n${itTxt.slice(0, 600)}`);
+  const btnState = await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.panel.left button')].find(x => x.textContent.startsWith('Complete:'));
+    return b ? { disabled: b.disabled, label: b.textContent } : null;
+  })()`);
+  if (!btnState || !btnState.disabled)
+    throw new Error('the Complete button must be disabled while the IT package is blocked');
+  await shot('commissioning-blocked', 30_000);
 
-  /* walk the programme in order; the correct order must never be gated */
-  for (let i = 0; i < 6; i++) {
+  /* following the correct order on a root package must never gate */
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.panel.left button.row')].find(x => x.textContent.includes('Grid exit point'));
+    b.click();
+    return true;
+  })()`);
+  await sleep(300);
+  for (let i = 0; i < 8; i++) {
     const state = await evaluate(`(() => {
       const b = [...document.querySelectorAll('.panel.left button')].find(x => x.textContent.startsWith('Complete:'));
-      return b ? { label: b.textContent, disabled: b.disabled } : { label: null, disabled: true };
+      return b ? { label: b.textContent, disabled: b.disabled } : { label: null };
     })()`);
     if (!state.label) break;
-    if (state.disabled) throw new Error(`following the correct order, "${state.label}" was unexpectedly gated`);
+    if (state.disabled)
+      throw new Error(`a root package with no prerequisites was gated at "${state.label}"`);
     await evaluate(`(() => {
       const b = [...document.querySelectorAll('.panel.left button')].find(x => x.textContent.startsWith('Complete:'));
       b.click();
       return true;
     })()`);
-    await sleep(320);
+    await sleep(300);
   }
-  const done = await evaluate(`document.querySelector('.panel.left').innerText`);
-  if (!/■/.test(done)) throw new Error('completed commissioning stages are not shown in the programme list');
+  const doneTxt = await evaluate(`document.querySelector('.panel.left').innerText`);
+  if (!/■/.test(doneTxt)) throw new Error('completed package stages are not shown');
   await shot('commissioning', 30_000);
 });
 
@@ -431,6 +455,7 @@ await step('inspector: select a component', async () => {
   if (!/failure modes/i.test(insp)) throw new Error('inspector is missing the failure mode view');
   if (!/PUBLIC FACT|TYPICAL/.test(insp)) throw new Error('inspector is missing the classification badge');
   if (!/dependenc/i.test(insp)) throw new Error('inspector is missing the dependency view');
+  if (!/turnover package/i.test(insp)) throw new Error('inspector is missing package-level commissioning status');
   await shot('inspector', 30_000);
 });
 

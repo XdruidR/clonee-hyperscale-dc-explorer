@@ -1,8 +1,15 @@
 import { create } from 'zustand';
 import type { SystemKey } from '../data/types';
-import { COMPONENTS, FLOW_LINKS, type CampusComponent } from '../data/campus';
+import { COMPONENTS, type CampusComponent } from '../data/campus';
 import { PHASES } from '../data/phases';
-import { CX_STAGES, CX_ORDER, cxOrderIndex } from '../data/commissioning';
+import { CX_STAGES } from '../data/commissioning';
+import {
+  TURNOVER_PACKAGES,
+  PACKAGE_BY_ID,
+  packagesContaining,
+  stageIndex,
+  type TurnoverPackage,
+} from '../data/turnover';
 
 export type Mode =
   | 'overview'
@@ -36,8 +43,8 @@ interface State {
   constructPhase: number;
   gridPhase: number;
   gridPlaying: boolean;
-  cxDone: string[];
-  cxCursor: number;
+  /** packageId -> completed stage ids. Commissioning is asset-specific. */
+  cx: Record<string, string[]>;
   cxRunning: boolean;
   faults: string[];
   isolateHall: number | null;
@@ -55,7 +62,7 @@ interface State {
   setConstructPhase: (p: number) => void;
   setGridPhase: (p: number) => void;
   setGridPlaying: (p: boolean) => void;
-  completeStage: (id: string) => void;
+  completePackageStage: (pkgId: string, stageId: string) => void;
   resetCx: () => void;
   toggleFault: (type: string) => void;
   clearFaults: () => void;
@@ -83,8 +90,7 @@ export const useStore = create<State>((set, get) => ({
   constructPhase: PHASES.length - 1,
   gridPhase: 0,
   gridPlaying: false,
-  cxDone: [],
-  cxCursor: 0,
+  cx: {},
   cxRunning: false,
   faults: [],
   isolateHall: null,
@@ -126,13 +132,13 @@ export const useStore = create<State>((set, get) => ({
   setConstructPhase: (p) => set({ constructPhase: Math.max(0, Math.min(PHASES.length - 1, p)) }),
   setGridPhase: (p) => set({ gridPhase: Math.max(0, p) }),
   setGridPlaying: (p) => set({ gridPlaying: p }),
-  completeStage: (id) =>
+  completePackageStage: (pkgId, stageId) =>
     set((s) => {
-      const done = s.cxDone.includes(id) ? s.cxDone : [...s.cxDone, id];
-      const idx = CX_ORDER.indexOf(id);
-      return { cxDone: done, cxCursor: Math.max(s.cxCursor, idx + 1) };
+      const done = s.cx[pkgId] ?? [];
+      if (done.includes(stageId)) return {};
+      return { cx: { ...s.cx, [pkgId]: [...done, stageId] } };
     }),
-  resetCx: () => set({ cxDone: [], cxCursor: 0 }),
+  resetCx: () => set({ cx: {} }),
   toggleFault: (type) =>
     set((s) => ({ faults: s.faults.includes(type) ? s.faults.filter((f) => f !== type) : [...s.faults, type] })),
   clearFaults: () => set({ faults: [] }),
@@ -162,18 +168,34 @@ export type BuildState = 'hidden' | 'building' | 'complete';
  * three's fitout past the end of the programme, which would mean the campus
  * never actually completes.
  */
+/**
+ * The one and only module-lag model.
+ *
+ * Later modules lag module 1, but the lag is proportional to the phase rather
+ * than a flat offset. A flat offset would push module 3's fitout past the end of
+ * the programme and the campus would never complete.
+ *
+ * Everything that needs to know when a module is live derives from
+ * modulePhaseOffset() - the construction panel, the HUD and the 3D build state
+ * all call the same function, so there is no second timeline model to drift.
+ */
 const MODULE_SHIFT: Record<number, number> = { 1: 0, 2: 4, 3: 8 };
 const LAST_PHASE = PHASES.length - 1;
 
-function lagged(phase: number, shift: number) {
+export function modulePhaseOffset(moduleId: number | undefined): number {
+  return (moduleId ? MODULE_SHIFT[moduleId] ?? 0 : 0);
+}
+
+/** Apply the module lag to a planned phase index. */
+export function laggedPhase(phase: number, moduleId?: number): number {
+  const shift = modulePhaseOffset(moduleId);
   if (!shift) return phase;
   return Math.min(LAST_PHASE, phase + Math.round((shift * phase) / LAST_PHASE));
 }
 
 export function buildStateOf(c: CampusComponent, phase: number): { state: BuildState; progress: number } {
-  const shift = c.module ? MODULE_SHIFT[c.module] : 0;
-  const s = lagged(c.build[0], shift);
-  const e = lagged(c.build[1], shift);
+  const s = laggedPhase(c.build[0], c.module);
+  const e = laggedPhase(c.build[1], c.module);
   if (c.temporary) {
     if (phase < s || phase > e + 1) return { state: 'hidden', progress: 0 };
     return { state: 'complete', progress: 1 };
@@ -184,55 +206,168 @@ export function buildStateOf(c: CampusComponent, phase: number): { state: BuildS
   return { state: 'building', progress: Math.max(0.15, (phase - s + 1) / Math.max(1, e - s + 1)) };
 }
 
+/* -------------------------------------------------------- module readiness */
+
+export interface ModuleReadiness {
+  module: number;
+  /** lagged phase at which the module's white space is energised */
+  fitoutPhase: number;
+  /** lagged phase at which its last turnover package completes */
+  readyPhase: number;
+  live: boolean;
+  handedOver: boolean;
+  componentsComplete: number;
+  componentsTotal: number;
+}
+
+/** Planned phases that mean "carries IT load" and "operational handover". */
+const FITOUT_GATE = 29; // racks and IT equipment installed
+const HANDOVER_GATE = 35; // operational handover
+
+export function moduleReadiness(moduleId: number, phase: number, components: CampusComponent[]): ModuleReadiness {
+  const fitoutPhase = laggedPhase(FITOUT_GATE, moduleId);
+  const readyPhase = laggedPhase(HANDOVER_GATE, moduleId);
+  const mine = components.filter((c) => c.module === moduleId);
+  const complete = mine.filter((c) => buildStateOf(c, phase).state === 'complete').length;
+  return {
+    module: moduleId,
+    fitoutPhase,
+    readyPhase,
+    live: phase >= fitoutPhase,
+    handedOver: phase >= readyPhase,
+    componentsComplete: complete,
+    componentsTotal: mine.length,
+  };
+}
+
+export function modulesReady(phase: number, components: CampusComponent[]): ModuleReadiness[] {
+  return [1, 2, 3].map((m) => moduleReadiness(m, phase, components));
+}
+
 /* ------------------------------------------------------ commissioning state */
 
 export interface CxBlocker {
+  packageId: string;
+  packageTitle: string;
   message: string;
-  component: string;
-  stage: string;
 }
 
-/** Upstream gates that must be complete before a component can pass a stage. */
-function upstreamOf(id: string): string[] {
-  return UPSTREAM[id] ?? [];
+/** Stages already complete for a turnover package. */
+export function packageDone(state: Record<string, string[]>, pkgId: string) {
+  return state[pkgId] ?? [];
 }
 
-/** The flow graph is the dependency graph: anything that feeds a component must
- *  be commissioned before it. Modelled from FLOW_LINKS rather than hand-listed. */
-const POWER_MEDIA = new Set(['hv', 'mv', 'lv', 'rack', 'coolant', 'chilled', 'fibre']);
-const UPSTREAM: Record<string, string[]> = (() => {
-  const m: Record<string, string[]> = {};
-  for (const link of FLOW_LINKS) {
-    if (!POWER_MEDIA.has(link.medium)) continue;
-    m[link.to] = [...(m[link.to] ?? []), link.from];
-  }
-  return m;
-})();
+/** The next stage this package has to complete, if any. */
+export function nextStageForPackage(state: Record<string, string[]>, pkgId: string): string | null {
+  const pkg = PACKAGE_BY_ID[pkgId];
+  if (!pkg) return null;
+  const done = packageDone(state, pkgId);
+  return pkg.stages.find((s) => !done.includes(s)) ?? null;
+}
 
-export function blockersFor(componentId: string, stageId: string, done: string[]): CxBlocker[] {
+/**
+ * Why a package cannot advance, expressed as real dependency reasons:
+ * either a stage in its own scope has not been signed off, or an upstream
+ * turnover package is behind it.
+ */
+export function blockersForPackage(state: Record<string, string[]>, pkgId: string): CxBlocker[] {
+  const pkg = PACKAGE_BY_ID[pkgId];
+  if (!pkg) return [];
+  const done = packageDone(state, pkgId);
+  const next = pkg.stages.find((s) => !done.includes(s));
   const out: CxBlocker[] = [];
-  const si = cxOrderIndex(stageId);
-  if (si < 0) return out;
-  const required = CX_ORDER.slice(0, si + 1);
-  for (const up of upstreamOf(componentId)) {
-    const upDoneAll = required.every((r) => done.includes(r));
-    if (!upDoneAll) {
-      const missing = required.filter((r) => !done.includes(r));
-      const last = missing[missing.length - 1];
+
+  /* upstream packages must be at least as far along as the stage we are on */
+  const want = next ? stageIndex(next) : Infinity;
+  for (const upId of pkg.requires) {
+    const up = PACKAGE_BY_ID[upId];
+    if (!up) continue;
+    const upDone = packageDone(state, upId);
+    const upHas = up.stages.filter((s) => stageIndex(s) <= want);
+    const behind = upHas.filter((s) => !upDone.includes(s));
+    if (behind.length) {
+      const verb = next ? 'cannot advance' : 'cannot be signed off';
       out.push({
-        message: `Upstream ${up} has not completed ${stageName(last)}`,
-        component: up,
-        stage: last,
+        packageId: upId,
+        packageTitle: up.title,
+        message: `${pkg.title} ${verb} because upstream turnover package "${up.title}" has not completed ${stageName(behind[behind.length - 1])}`,
+      });
+    }
+  }
+
+  if (next) {
+    const stage = CX_STAGES.find((s) => s.id === next);
+    /* Only prerequisites that fall INSIDE this turnover boundary can block it.
+       Programme-level prerequisites outside the boundary (for example factory
+       testing of bought-in equipment that is commissioned elsewhere) are carried
+       by the `requires` edges instead. */
+    const inBoundary = new Set(pkg.stages);
+    const missing = (stage?.needs ?? []).filter((n) => inBoundary.has(n) && !done.includes(n));
+    for (const m of missing) {
+      out.push({
+        packageId: pkgId,
+        packageTitle: pkg.title,
+        message: `${pkg.title}: ${stageName(m)} has not been completed in this package`,
       });
     }
   }
   return out;
 }
 
+/** Commissioning summary for one component, via its turnover packages. */
+export interface ComponentCxStatus {
+  packages: { id: string; title: string; done: number; total: number; complete: boolean }[];
+  blocking: CxBlocker[];
+  status: 'not-started' | 'in-progress' | 'complete' | 'out-of-scope';
+}
+
+/**
+ * A component is only complete when its own turnover package AND every package
+ * that package depends on are signed off. A rack sits in one package, but it
+ * genuinely requires its power, cooling and network packages, so the status has
+ * to be computed over that upstream closure.
+ */
+export function requiredPackagesFor(componentId: string): TurnoverPackage[] {
+  const direct = packagesContaining(componentId);
+  if (!direct.length) return [];
+  const seen = new Set<string>();
+  const queue = direct.map((p) => p.id);
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const r of PACKAGE_BY_ID[id]?.requires ?? []) queue.push(r);
+  }
+  return [...seen].map((id) => PACKAGE_BY_ID[id]).filter(Boolean);
+}
+
+export function componentCxStatus(state: Record<string, string[]>, componentId: string): ComponentCxStatus {
+  const own = packagesContaining(componentId);
+  if (!own.length) return { packages: [], blocking: [], status: 'out-of-scope' };
+  const required = requiredPackagesFor(componentId);
+  const summary = required.map((p) => {
+    const done = packageDone(state, p.id).length;
+    return { id: p.id, title: p.title, done, total: p.stages.length, complete: done >= p.stages.length };
+  });
+  const blocking = own.flatMap((p) => blockersForPackage(state, p.id));
+  const status: ComponentCxStatus['status'] = summary.every((s) => s.complete)
+    ? 'complete'
+    : summary.some((s) => s.done > 0)
+      ? 'in-progress'
+      : 'not-started';
+  return { packages: summary, blocking, status };
+}
+
+/** Packages whose commissioning status is currently blocking the campus. */
+export function outstandingPackages(state: Record<string, string[]>) {
+  return TURNOVER_PACKAGES.filter((p) => (state[p.id] ?? []).length < p.stages.length);
+}
+
 export function stageName(id: string) {
   return CX_STAGES.find((s) => s.id === id)?.name ?? id;
 }
 
+/** Programme-level prerequisite check, used by the commissioning panel header. */
 export function canStartStage(stageId: string, done: string[]): boolean {
   const stage = CX_STAGES.find((s) => s.id === stageId);
   if (!stage) return false;

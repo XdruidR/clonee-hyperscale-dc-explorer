@@ -51,6 +51,28 @@ export const PACKAGE_COLOR: Record<Package, string> = {
   'IT FITOUT': '#c084fc',
 };
 
+/**
+ * A single statement with its own provenance.
+ *
+ * A component's headline classification is not enough: a component can be
+ * PUBLIC FACT while an individual technical bullet is a TYPICAL assumption.
+ * `technical` accepts either a plain string - which inherits the component's
+ * classification - or an explicit Claim when the statement needs its own label
+ * and sources.
+ */
+export interface Claim {
+  text: string;
+  classification: Classification;
+  sources?: string[];
+  formula?: string;
+}
+
+export type TechnicalEntry = string | Claim;
+
+export function toClaim(entry: TechnicalEntry, inherited: Classification): Claim {
+  return typeof entry === 'string' ? { text: entry, classification: inherited } : entry;
+}
+
 export interface ComponentInfo {
   type: string;
   system: SystemKey;
@@ -58,8 +80,8 @@ export interface ComponentInfo {
   /** one-line "what is it" for the inspector headline */
   what: string;
   why: string;
-  /** technical teaching bullets (voltage step, energy conversion, heat, etc.) */
-  technical: string[];
+  /** technical teaching bullets; strings inherit the component classification */
+  technical: TechnicalEntry[];
   failureModes: string[];
   redundancy: string;
   upstream: string;
@@ -81,6 +103,12 @@ export interface ComponentInfo {
   facts?: string[];
   /** typical-only caveat shown in evidence mode */
   publicLimit?: string;
+  /** interfaces that historically cause trouble on this kind of equipment */
+  interfaceRisk?: string[];
+  /** what a project controls team should track for this equipment */
+  controlsTrack?: string[];
+  /** the question to ask in a meeting about this equipment */
+  meetingQuestion?: string;
 }
 
 export const PACKAGES: Package[] = [
