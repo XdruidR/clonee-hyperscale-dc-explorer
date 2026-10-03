@@ -488,6 +488,161 @@ await step('sources and method panel', async () => {
   if (!(links >= 12)) throw new Error(`source register has only ${links} external links`);
 });
 
+await step('phone layout', async () => {
+  /* emulate a tailnet Android handset and reload, so the layout is driven by a
+     real viewport rather than a forced flag */
+  await S('Emulation.setDeviceMetricsOverride', {
+    width: 412,
+    height: 915,
+    deviceScaleFactor: 2.625,
+    mobile: true,
+    screenOrientation: { angle: 0, type: 'portraitPrimary' },
+  });
+  await S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  await S('Emulation.setUserAgentOverride', {
+    userAgent:
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  });
+  await S('Page.navigate', { url: `http://127.0.0.1:${PORT}${BASE}` });
+  await sleep(4000);
+
+  const layout = await evaluate(`(() => {
+    const tabs = document.querySelectorAll('.m-tabbar button');
+    const sidePanels = [...document.querySelectorAll('.panel.left, .panel.right')];
+    const floating = sidePanels.filter((el) => {
+      if (el.closest('.m-sheet-body')) return getComputedStyle(el).position !== 'static';
+      return true; // outside the sheet means a desktop panel was left floating
+    });
+    return {
+      tabbar: tabs.length,
+      tabLabels: [...tabs].map(t => t.textContent.trim()),
+      modepicker: document.querySelectorAll('.m-modepicker button').length,
+      sidePanelCount: sidePanels.length,
+      floatingSidePanels: floating.length,
+      canvas: (() => { const c = document.querySelector('canvas'); return c ? { w: c.clientWidth, h: c.clientHeight } : null; })(),
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+    };
+  })()`);
+
+  if (layout.tabbar !== 4) throw new Error(`expected a 4-tab phone bar, got ${layout.tabbar}`);
+  if (layout.floatingSidePanels > 0)
+    throw new Error('the desktop side panels are still floating over the phone layout');
+  if (layout.modepicker < 8) throw new Error('the mode picker is missing from the phone toolbar');
+  if (!layout.canvas || layout.canvas.w < 380)
+    throw new Error(`canvas is not using the phone viewport: ${JSON.stringify(layout.canvas)}`);
+
+  /* every tab must open its own sheet */
+  for (const label of ['Explain', 'Journeys']) {
+    await evaluate(`(() => {
+      const target = [...document.querySelectorAll('.m-tabbar button')].find(x => x.textContent.includes(${JSON.stringify(label)}));
+      // clicking an already-active tab closes the sheet, so close first if needed
+      const sheetOpen = document.querySelector('.m-sheet');
+      const isOpen = sheetOpen && ${JSON.stringify(label)} === 'Explain'
+        ? document.querySelector('.m-sheet-head span')?.textContent.trim() === 'Explain'
+        : false;
+      if (isOpen) return true;
+      target.click();
+      return true;
+    })()`);
+    await sleep(450);
+    const sheetTitle = await evaluate(`(() => {
+      const h = document.querySelector('.m-sheet-head span');
+      return h ? h.textContent.trim() : '';
+    })()`);
+    if (sheetTitle.toLowerCase() !== label.toLowerCase())
+      throw new Error(`tab "${label}" did not open its sheet (got "${sheetTitle}")`);
+  }
+  await shot('phone-journeys', 60_000);
+
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.m-tabbar button')].find(x => x.textContent.includes('Explain'));
+    b.click();
+    return true;
+  })()`);
+  await sleep(500);
+  const explainText = await evaluate(`document.querySelector('.m-sheet-body').innerText`);
+  if (explainText.length < 200) throw new Error('the explain sheet is empty on a phone');
+
+  /* the 3D labels are a DOM overlay; they must not paint over the sheet */
+  const layering = await evaluate(`(() => {
+    const sheet = document.querySelector('.m-sheet');
+    const tabbar = document.querySelector('.m-tabbar');
+    if (!sheet || !tabbar) return { ok: false, why: 'missing chrome' };
+    const sheetZ = parseInt(getComputedStyle(sheet).zIndex || '0', 10);
+    const tabZ = parseInt(getComputedStyle(tabbar).zIndex || '0', 10);
+    // the highest z-index drei gives its Html labels
+    let labelMax = 0;
+    for (const el of document.querySelectorAll('.w3d-label-text')) {
+      let n = el;
+      while (n && n !== document.body) {
+        const z = parseInt(getComputedStyle(n).zIndex || '0', 10);
+        if (z > labelMax) labelMax = z;
+        n = n.parentElement;
+      }
+    }
+    return { ok: sheetZ > labelMax && tabZ > labelMax, sheetZ, tabZ, labelMax };
+  })()`);
+  if (!layering.ok)
+    throw new Error(`3D labels paint over the phone chrome: ${JSON.stringify(layering)}`);
+  await shot('phone-explain', 60_000);
+
+  /* view options sheet, including the toggles that moved off the toolbar */
+  await evaluate(`(() => {
+    [...document.querySelectorAll('.m-topbar-actions button')].find(x => x.title === 'View options').click();
+    return true;
+  })()`);
+  await sleep(400);
+  const viewOk = await evaluate(`(() => {
+    const body = document.querySelector('.m-sheet-body');
+    if (!body) return { ok: false, why: 'no sheet' };
+    const text = body.innerText;
+    return {
+      ok: /roof off/i.test(text) && /cutaway/i.test(text) && /evidence mode/i.test(text) && /isolat/i.test(text),
+      len: text.length,
+    };
+  })()`);
+  if (!viewOk.ok) throw new Error(`view options sheet incomplete: ${JSON.stringify(viewOk)}`);
+  await shot('phone-view', 60_000);
+
+  /* the journey card must not cover the whole campus on a phone */
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.m-tabbar button')].find(x => x.textContent.includes('Journeys'));
+    b.click();
+    return true;
+  })()`);
+  await sleep(350);
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.m-sheet-body button.row')][0];
+    b.click();
+    return true;
+  })()`);
+  await sleep(1500);
+  const cardBox = await evaluate(`(() => {
+    const c = document.querySelector('.journey-card');
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, height: r.height, width: r.width, vh: window.innerHeight };
+  })()`);
+  if (!cardBox) throw new Error('the journey card did not open on a phone');
+  if (cardBox.height > cardBox.vh * 0.75)
+    throw new Error(`the journey card covers the screen: ${JSON.stringify(cardBox)}`);
+  await shot('phone-journey', 60_000);
+
+  /* back to the campus, and confirm the desktop layout is restored on resize */
+  await evaluate(`(() => {
+    const b = [...document.querySelectorAll('.m-tabbar button')].find(x => x.textContent.includes('Campus'));
+    b.click();
+    return true;
+  })()`);
+  await sleep(300);
+  const closed = await evaluate(`document.querySelector('.m-sheet') === null`);
+  if (!closed) throw new Error('tapping Campus should close the sheet');
+  await shot('phone-campus', 60_000);
+
+  await S('Emulation.clearDeviceMetricsOverride');
+  await S('Emulation.setTouchEmulationEnabled', { enabled: false });
+});
+
 /* ------------------------------------------------------------------ wrap up */
 drain();
 

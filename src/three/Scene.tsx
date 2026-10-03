@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, OrbitControls } from '@react-three/drei';
+import { framed } from '../state/store';
 import { Campus } from './Campus';
 import { Flows } from './Flows';
 import { useStore } from '../state/store';
@@ -84,6 +85,7 @@ function Environment({ ground }: { ground: string }) {
 
 function CameraRig() {
   const controls = useRef<any>(null);
+  const initial = framed([560, 430, 640], [-40, 0, 20]);
   const request = useStore((s) => s.camera);
   const anim = useRef({ active: false, pos: new THREE.Vector3(), target: new THREE.Vector3() });
   const { camera } = useThree();
@@ -115,7 +117,7 @@ function CameraRig() {
       minDistance={22}
       maxDistance={2600}
       maxPolarAngle={Math.PI * 0.495}
-      target={[-40, 0, 20]}
+      target={initial.target}
     />
   );
 }
@@ -136,9 +138,10 @@ function Deselect() {
 }
 
 export function Scene() {
+  const start = framed([560, 430, 640], [-40, 0, 20]);
   return (
     <Canvas
-      camera={{ position: [560, 430, 640], fov: 42, near: 1, far: 8000 }}
+      camera={{ position: start.pos, fov: 42, near: 1, far: 8000 }}
       dpr={[1, 1.8]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       onPointerMissed={() => useStore.getState().select(null, false)}

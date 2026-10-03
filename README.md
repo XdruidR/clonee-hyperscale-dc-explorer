@@ -134,6 +134,24 @@ simultaneous build. A hall is a fault domain and a delivery module at the same t
 the same graph the flows are drawn from. Try to commission a rack and it tells you which upstream item has not
 finished. Includes the simulated scenarios: pull the utility, fail a generator, fail a pump, lose a path.
 
+### On a phone
+
+Below 820 px the app switches to a different arrangement rather than squeezing the desktop one: a compact bar with a
+scrollable mode picker, a full-width bottom sheet with one panel in it at a time, and a persistent four-tab bar
+(**Campus / Explain / Inspect / Journeys**). The campus is always visible behind the sheet, view options live in
+their own sheet, and the colour key moved into the Explain sheet so it stops costing a sixth of the screen.
+
+Two things this needed that the desktop layout did not:
+
+- **Aspect-aware framing.** The camera field of view is vertical, so a portrait phone sees roughly half the
+  horizontal extent of a desktop at the same camera position. Wide shots are pulled back by the inverse aspect
+  ratio; close-up shots are tapered, because doubling the distance to a transformer would turn a close-up into a
+  mid-shot and lose the point of the step.
+- **Layering.** The 3D labels are a DOM overlay, so every floating panel sits above them. This was a real bug: the
+  labels painted over the phone sheet until the z-order was fixed. The smoke suite now asserts it.
+
+Tap a component to focus and inspect it — hover is not required anywhere in the phone layout.
+
 ### Other controls
 
 - roof off · cutaway · exploded · labels · flow animation

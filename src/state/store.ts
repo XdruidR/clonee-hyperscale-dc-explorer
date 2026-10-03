@@ -52,6 +52,9 @@ interface State {
   journey: { id: string; step: number } | null;
   camera: CameraRequest;
   panelOpen: boolean;
+  /** which bottom sheet is open in the phone layout */
+  sheet: 'mode' | 'inspect' | 'learn' | 'view' | null;
+  setSheet: (s: 'mode' | 'inspect' | 'learn' | 'view' | null) => void;
   setMode: (m: Mode) => void;
   select: (id: string | null, focus?: boolean) => void;
   hover: (id: string | null) => void;
@@ -98,6 +101,9 @@ export const useStore = create<State>((set, get) => ({
   journey: null,
   camera: { pos: [560, 430, 640], target: [-40, 0, 20], token: 0 },
   panelOpen: true,
+  sheet: 'mode',
+
+  setSheet: (sh) => set({ sheet: sh }),
 
   /**
    * Switching mode also sets a sensible interior view, because a power, cooling
@@ -115,7 +121,7 @@ export const useStore = create<State>((set, get) => ({
       ...(m === 'construction' ? { roofOff: false, cutaway: false } : {}),
     }),
   select: (id, focus = true) => {
-    set({ selected: id });
+    set((prev) => ({ selected: id, ...(id && prev.sheet === 'mode' ? { sheet: 'inspect' as const } : {}) }));
     if (id && focus) {
       const c = COMPONENTS.find((x) => x.id === id);
       if (c) {
@@ -147,8 +153,47 @@ export const useStore = create<State>((set, get) => ({
   startJourney: (id) => set({ journey: { id, step: 0 }, selected: null }),
   setJourneyStep: (step) => set((s) => (s.journey ? { journey: { ...s.journey, step } } : {})),
   endJourney: () => set({ journey: null }),
-  moveCamera: (pos, target) => set((s) => ({ camera: { pos, target, token: s.camera.token + 1 } })),
+  moveCamera: (pos, target) =>
+    set((s) => {
+      const f = framed(pos, target);
+      return { camera: { pos: f.pos, target: f.target, token: s.camera.token + 1 } };
+    }),
 }));
+
+/**
+ * Framing compensation for narrow viewports.
+ *
+ * The camera field of view is vertical, so a portrait phone at 412x915 sees
+ * roughly half the horizontal extent of a desktop at 1600x900 even though the
+ * camera has not moved. Pulling back by the inverse aspect ratio keeps the
+ * campus framed on a phone instead of showing one hall.
+ */
+export function frameScale(): number {
+  if (typeof window === 'undefined') return 1;
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+  if (aspect >= 1.2) return 1;
+  return Math.min(2.4, 0.95 / Math.max(0.3, aspect));
+}
+
+export function framed(pos: [number, number, number], target: [number, number, number]) {
+  const k = frameScale();
+  if (k === 1) return { pos, target };
+  /* Taper the pull-back by how wide the shot already is. A campus overview
+     needs the full compensation or the site is cropped; a close-up of one
+     transformer does not, and doubling its distance would turn it into a
+     mid-shot and lose the point of the step. */
+  const d = Math.hypot(pos[0] - target[0], pos[1] - target[1], pos[2] - target[2]);
+  const wide = Math.max(0, Math.min(1, (d - 260) / 640));
+  const s = 1 + (k - 1) * wide;
+  return {
+    pos: [
+      target[0] + (pos[0] - target[0]) * s,
+      target[1] + (pos[1] - target[1]) * s,
+      target[2] + (pos[2] - target[2]) * s,
+    ] as [number, number, number],
+    target,
+  };
+}
 
 function cameraFor(c: CampusComponent): { pos: [number, number, number]; target: [number, number, number] } {
   const span = Math.max(c.size[0], c.size[2]) * 0.9 + 40;

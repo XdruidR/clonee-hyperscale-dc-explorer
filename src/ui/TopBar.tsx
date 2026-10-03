@@ -35,7 +35,7 @@ export function TopBar({ onSources }: { onSources: () => void }) {
   const panelOpen = useStore((s) => s.panelOpen);
   const moveCamera = useStore((s) => s.moveCamera);
 
-  const overview = () => moveCamera([560, 430, 640], [-40, 0, 20]);
+  const overview = () => moveCamera([560, 430, 640], [-40, 0, 20]); // framed in the store
   const topDown = () => moveCamera([10, 900, 120], [-20, 0, 0]);
 
   return (
