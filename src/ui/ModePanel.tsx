@@ -1448,6 +1448,7 @@ function ControlsPanel() {
         <button onClick={() => setMonth(Math.max(0, month - 1))} aria-label="Earlier data date">‹</button>
         <span className="tiny" style={{ flex: 1, textAlign: 'center' }}>
           data date {ev.period} · {ev.month} months in
+          {ev.period === 'open' && <span style={{ color: 'var(--typical)' }}> · past programme end</span>}
         </span>
         <button onClick={() => setMonth(Math.min(PHASES.length - 1, month + 1))} aria-label="Later data date">›</button>
       </div>

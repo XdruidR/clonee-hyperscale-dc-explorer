@@ -8,6 +8,12 @@ export interface ShapeProps {
   c: CampusComponent;
   color: string;
   opacity: number;
+  /**
+   * How prominent this component is in the current view, 0..1. Distinct from
+   * opacity: a dimmed component is still fully opaque, and shapes that vary
+   * their saturation by prominence need this rather than a decoded opacity.
+   */
+  dim: number;
   emissive?: string;
   roofOff: boolean;
   cutaway: boolean;
@@ -16,6 +22,20 @@ export interface ShapeProps {
 
 function boxArgs(size: [number, number, number]): [number, number, number] {
   return [size[0], size[1], size[2]];
+}
+
+/**
+ * Blend a colour toward another.
+ *
+ * Used where an equipment mass is numerous enough that its full system colour
+ * would dominate the campus view. The system colour is still the source, so the
+ * equipment still reads as belonging to its system without being the loudest
+ * thing on screen.
+ */
+function mixToward(color: string, toward: string, amount: number): string {
+  const a = new THREE.Color(color);
+  const b = new THREE.Color(toward);
+  return `#${a.lerp(b, amount).getHexString()}`;
 }
 
 /**
@@ -301,6 +321,7 @@ export function Shape({
   c,
   color,
   opacity,
+  dim: dimHint,
   emissive,
   roofOff,
   cutaway,
@@ -380,14 +401,21 @@ export function Shape({
     }
 
     case 'gen-heat-rejection': {
-      /* radiators beside each set: a tall finned face, deliberately taller than
-         the enclosure so the compound reads as a heat-rejection zone */
+      /* Radiators beside each set: a tall finned face, deliberately taller than
+         the enclosure so the compound reads as a heat-rejection zone.
+
+         The colour is pulled toward the metal rather than used at full strength.
+         At campus scale there are ninety of these, and at full cooling-system
+         saturation a compound of small radiators reads as a field of alarm
+         rather than as plant. It still takes the system colour when one system is
+         isolated, because then it is the point of the view. */
+      const tint = dimHint === 1 ? mixToward(color, '#6b7280', 0.55) : color;
       return (
         <group>
           <InstancedBoxes
             offsets={c.offsets ?? [[0, 0]]}
             size={[w * 1.1, h, 0.6]}
-            color={color}
+            color={tint}
             opacity={opacity}
             emissive={emissive}
             y={0.4}
@@ -396,8 +424,8 @@ export function Shape({
           <InstancedBoxes
             offsets={c.offsets ?? [[0, 0]]}
             size={[w * 1.14, h * 0.16, 0.8]}
-            color="#8a949e"
-            opacity={opacity * 0.8}
+            color={mixToward(tint, '#aab3bd', 0.5)}
+            opacity={opacity * 0.9}
             y={0.4}
             {...P}
           />
@@ -491,18 +519,25 @@ export function Shape({
 
     /* ---------------------------------------------------------------- cooling */
     case 'air-cooler': {
-      /* indirectly air cooled plant: a V-bank in a louvred casing, in long rows.
+      /* Indirectly air cooled plant: a V-bank in a louvred casing, in long rows.
          Drawn as a body plus a louvre face because the louvre is the interface
-         with security and fire that keeps reappearing as a design conflict. */
+         with security and fire that keeps reappearing as a design conflict.
+
+         There are twenty-four of these per building. At full cooling-system
+         saturation five banks of them are the loudest thing on the campus, which
+         is both visually wrong and slightly dishonest about the balance of the
+         site, so the body is pulled toward the metal at campus scale and the
+         louvre face keeps the identifying colour. */
+      const body = dimHint === 1 ? mixToward(color, '#71797f', 0.5) : color;
       return (
         <group>
           <InstancedBoxes offsets={c.offsets ?? [[0, 0]]} size={[w + 1.2, 0.5, d + 1.2]} color="#3d454d" opacity={opacity} y={0} {...P} />
-          <InstancedBoxes offsets={c.offsets ?? [[0, 0]]} size={size} color={color} opacity={opacity} emissive={emissive} y={0.5} {...P} />
+          <InstancedBoxes offsets={c.offsets ?? [[0, 0]]} size={size} color={body} opacity={opacity} emissive={emissive} y={0.5} {...P} />
           <InstancedBoxes
             offsets={(c.offsets ?? [[0, 0]]).map(([x, z]) => [x, z + d / 2 + 0.05] as [number, number])}
             size={[w * 0.94, h * 0.82, 0.3]}
-            color="#5f6a74"
-            opacity={opacity * 0.85}
+            color={color}
+            opacity={opacity * 0.9}
             y={0.7}
             {...P}
           />
@@ -510,7 +545,7 @@ export function Shape({
           <InstancedBoxes
             offsets={(c.offsets ?? [[0, 0]]).map(([x, z]) => [x, z] as [number, number])}
             size={[w * 0.8, 0.7, d * 0.72]}
-            color="#2f363d"
+            color={mixToward(body, '#2f363d', 0.5)}
             opacity={opacity}
             y={h + 0.5}
             {...P}

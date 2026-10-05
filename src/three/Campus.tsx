@@ -196,6 +196,7 @@ function Node({ c, showLabel }: { c: CampusComponent; showLabel: boolean }) {
         c={c}
         color={colour}
         opacity={dim < 1 ? 0.16 + dim * 0.84 : 1}
+        dim={dim}
         emissive={emissive}
         roofOff={roofOff}
         cutaway={cutaway}
