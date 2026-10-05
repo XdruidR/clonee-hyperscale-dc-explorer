@@ -142,7 +142,11 @@ npm run build      # production build to dist/
 npm run preview    # serve the production build
 npm run typecheck  # TypeScript, no emit
 npm run selftest   # data-model integrity checks
+npm run smoke      # headless-browser checks against the built bundle
 ```
+
+Node 22 or newer. The smoke suite drives headless Chromium over the DevTools
+protocol using a global `WebSocket`, which Node 20 does not provide.
 
 The build is static: no backend, no runtime configuration, nothing to host beyond
 files. It is published by the GitHub Actions workflow in `.github/workflows/` when
