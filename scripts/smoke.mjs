@@ -103,15 +103,36 @@ const chrome = spawn(CHROME, [
 ]);
 chrome.stderr.on('data', () => {});
 
+/**
+ * Chrome's own stderr, kept. Swallowing it makes a startup failure
+ * indistinguishable from a slow startup, which is the wrong trade when the only
+ * symptom is "devtools did not come up".
+ */
+const chromeStderr = [];
+chrome.stderr?.on('data', (b) => {
+  chromeStderr.push(String(b));
+  if (chromeStderr.length > 200) chromeStderr.shift();
+});
+
+/**
+ * Wait for the DevTools endpoint.
+ *
+ * The timeout is generous because a cold CI runner can spend fifteen seconds
+ * installing Chromium and several more starting it under software rendering. A
+ * tight timeout here produces intermittent failures that look like application
+ * faults and are not.
+ */
 async function waitForDevtools() {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 240; i++) {
     try {
       const r = await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`);
       if (r.ok) return (await r.json()).webSocketDebuggerUrl;
     } catch {}
     await sleep(250);
   }
-  throw new Error('chrome devtools did not come up');
+  throw new Error(
+    `chrome devtools did not come up after 60s.\nchrome stderr:\n${chromeStderr.join('').slice(-2000)}`,
+  );
 }
 
 const wsUrl = await waitForDevtools();
