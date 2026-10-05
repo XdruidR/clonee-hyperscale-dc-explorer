@@ -1,24 +1,45 @@
-import type { SystemKey } from './types';
-import { waterIntensitySentence } from './calculations';
+/**
+ * Guided journeys: eight guided tours through the Clonee model.
+ *
+ * A journey is a sequence of camera-and-view states with teaching text. The
+ * component ids in `focus` and `look` are the ones the model knows about; every
+ * other component is dimmed while a step is showing, so the set of ids is the
+ * argument the step is making.
+ *
+ * Rules observed here:
+ *   - Every number quoted in a body or an evidence line comes from
+ *     `calculations.ts`, either an input, an assumption or a derived value.
+ *   - Every component id exists in `COMPONENTS`.
+ *   - `isolateHall` takes a BUILDING index in campus reading order, 1 for CLN1,
+ *     2 for CLN2, 3 for CLN3, 4 for CLN5, 5 for CLN6.
+ *   - Where a claim is typical practice rather than a Clonee fact, the evidence
+ *     line says so. That is the whole point of the application.
+ */
+
+import { ASSUMPTIONS, derived, fmt, fmtInt, INPUTS, waterIntensitySentence } from './calculations';
+import { FIBRE_CHAIN, HALL_NAME, HEAT_CHAIN, POWER_CHAIN, RETROFIT_HALL, WATER_CHAIN } from './campus';
 
 export interface JourneyStep {
   title: string;
   body: string;
-  /** component ids to highlight; everything else dims */
+  /** component ids to keep lit; everything else dims */
   focus: string[];
-  /** component ids to focus the camera on (average position) */
+  /** component ids the camera should look at when there is no explicit camera */
   look: string[];
-  mode: SystemKey | 'overview' | 'construction' | 'commissioning' | 'resilience';
+  mode: 'power' | 'cooling' | 'water' | 'data' | 'site' | 'overview' | 'construction' | 'commissioning' | 'controls' | 'ai';
   camera?: { pos: [number, number, number]; target: [number, number, number] };
-  /** UI hints applied for the step */
   view?: {
     roofOff?: boolean;
     cutaway?: boolean;
     explode?: number;
+    /**
+     * Campus reading index 1..5 of the data-storage building to isolate.
+     * Named `isolateHall` historically; on this campus the isolatable unit is
+     * the building, so the store maps it onto `isolateBuilding`.
+     */
     isolateHall?: number | null;
     labels?: boolean;
     flows?: boolean;
-    follow?: 'grid' | 'heat' | 'fibre' | null;
   };
   evidence?: string;
 }
@@ -31,539 +52,614 @@ export interface Journey {
   steps: JourneyStep[];
 }
 
+/** The five data-storage buildings in campus reading order, for isolateHall. */
+const CLN1 = 1;
+const CLN2 = 2;
+
+/**
+ * Assumption values by key, looked up from the table in `calculations.ts`.
+ *
+ * Prose in this file is not allowed to restate a number by hand. Inputs and
+ * derived values are imported directly; the handful of figures that had to be
+ * invented are read out of `ASSUMPTIONS` here, so if a value is ever revised
+ * the sentence changes with it and the reason travels with it.
+ */
+function A(key: string): number {
+  const found = ASSUMPTIONS.find((a) => a.key === key);
+  if (!found) throw new Error(`journeys.ts: unknown assumption ${key}`);
+  return found.value;
+}
+
 export const JOURNEYS: Journey[] = [
+  /* ------------------------------------------------------------------ 1 grid */
   {
-    id: 'electrons',
-    title: 'How does electricity reach a GPU?',
-    blurb: 'Follow one unbroken path from the transmission corridor to a single accelerator.',
+    id: 'grid',
+    title: 'The 15-month grid connection',
+    blurb:
+      'The loop-in, the towers, the switchyard and the transformers — the part of the campus that had to be built before anything else could be switched on.',
     classificationHint:
-      'PUBLIC FACT that a dedicated HV connection and 84 sets of 3.2 MW exist. TYPICAL for every voltage step between the substation and the rack — the public record stops at "substation" and "switchgear".',
+      'PUBLIC FACT for the loop-in, the two towers, the 12 bays, 27 masts, three transformers, the compound area and the August 2017 energisation; the transformer ratings and everything inside the 15 months are DERIVED or TYPICAL.',
     steps: [
       {
-        title: 'Start at the transmission corridor',
-        body: 'Four high-voltage circuits cross the north-east of the site, plus a 33 kV distribution line through the middle. The campus does not generate its own power; it consumes a very large amount of it.',
-        focus: ['hv.line'],
-        look: ['hv.line'],
+        title: 'A loop-in, not a spur',
+        body:
+          'Clonee does not get its own radial line out of the transmission network. The consented connection is a loop-in: the existing 220 kV line arrives, breaks at the site, passes through a new station and carries on. That is why two new transmission towers stand on the model rather than one, and why the connection needed planning consent in its own right, under An Bord Pleanála reference VA0018, rather than sitting inside the data-centre consent.',
+        focus: ['hv.line', 'sub.tower1', 'sub.tower2'],
+        look: ['hv.line', 'sub.tower1', 'sub.tower2'],
         mode: 'power',
-        camera: { pos: [640, 300, -520], target: [300, 20, -260] },
-        evidence: 'PUBLIC FACT: circuit presence and location are documented; ratings and protection settings are not.',
+        camera: { pos: [620, 210, -800], target: [200, 26, -520] },
+        evidence:
+          'PUBLIC FACT: BP-VA0018 — loop-in connection to the existing 220 kV transmission system, and two new 220 kV transmission towers.',
       },
+      {
+        title: 'Why the customer built the station',
+        body: `A campus carrying ${fmt(derived.itCapacityMW, 0)} MW of IT load cannot be fed from the distribution network at all; that is transmission scale. EirGrid's own record is specific that the station was constructed by the customer and connected by EirGrid, and that it was the first customer-built 220 kV station in Ireland. The company therefore designed, permitted, built and commissioned a transmission asset on its own land, which is why the substation appears here as a workstream in its own right rather than as a utility hook-up.`,
+        focus: ['sub.platform', 'sub.bay', 'sub.control'],
+        look: ['sub.platform'],
+        mode: 'power',
+        camera: { pos: [560, 165, 250], target: [330, 8, 0] },
+        evidence: 'PUBLIC FACT: EIR-AR2017 — constructed by the customer, connected by EirGrid, the first customer-built 220 kV station in Ireland.',
+      },
+      {
+        title: 'Twelve bays, outdoors',
+        body: `The switchyard is air-insulated: ${INPUTS.hvBays} bays of 220 kV equipment standing outdoors on steel structures, protected by ${INPUTS.lightningMasts} lightning masts on reinforced concrete bases ${fmtInt(INPUTS.substationMastHeightM)} m high. The bay-for-bay arrangement shown is a simplified loop-in scheme — the count is published, the layout is not. Air-insulated gear outdoors is the norm at this voltage because the clearances a gas-insulated design demands would multiply the footprint of a compound that is already about ${fmtInt(INPUTS.substationAreaM2)} m².`,
+        focus: ['sub.bay'],
+        look: ['sub.bay'],
+        mode: 'power',
+        camera: { pos: [486, 62, -104], target: [364, 11, -44] },
+        evidence:
+          'PUBLIC FACT: BP-VA0018 — outdoor 220 kV air-insulated switchgear, 12 × 220 kV bays, 27 lightning-protection masts, compound of approximately 30,100 m². DERIVED: the bay arrangement.',
+      },
+      {
+        title: 'Three transformers',
+        body: `Three step-down transformers take ${INPUTS.transmissionKv} kV down to the campus medium voltage. The public record gives the count and no ratings, so the model sizes them from the consented campus load: three at ${A('transformerMva')} MVA give ${fmt(derived.transformerTotalMva, 0)} MVA. That is ${fmt(derived.transformerLoadPct, 0)}% loaded against a whole-facility draw of about ${fmt(derived.facilityLoadMW, 0)} MW, and it produces the most interesting arithmetic on the site: lose one and ${fmt(derived.nMinusOneMva, 0)} MVA remain, ${fmt(derived.nMinusOneShortfallMW, 0)} MW short of carrying everything.`,
+        focus: ['sub.xfmr'],
+        look: ['sub.xfmr'],
+        mode: 'power',
+        camera: { pos: [348, 44, 116], target: [296, 8, 34] },
+        evidence:
+          'PUBLIC FACT: BP-VA0018 — three step-down transformers, no ratings. DERIVED: 90 MVA each, from the consented campus load and the assumption stated in the model.',
+      },
+      {
+        title: 'Underground to the buildings',
+        body:
+          'Below the transformers the campus distribution changes character. The Meath County Council consent for the data centre states that the electricity between the substation and the buildings runs underground at 20 kV. No overhead campus distribution, nothing visible between the compound and the halls. That cable route is one of the reasons the consented site area is as large as it is, because a trench corridor has to be reserved long before anyone knows which building will be fitted out first.',
+        focus: ['sub.mvb', 'CLN1.mv', 'CLN2.mv', 'CLN3.mv', 'CLN5.mv', 'CLN6.mv'],
+        look: ['CLN1.mv'],
+        mode: 'power',
+        camera: { pos: [-90, 78, -128], target: [-192, 6, -232] },
+        evidence:
+          'PUBLIC FACT: MCC-150605 — underground 20 kV electricity cables between the substation and the data-centre buildings. TYPICAL: the switchboard lineup inside each building.',
+      },
+      {
+        title: 'August 2017, and what it sat on',
+        body: `EirGrid records the station completed in August ${INPUTS.gridConnectionYear}, connected in approximately ${INPUTS.gridConnectionMonths} months. The civil and structural package underneath is documented separately: about ${fmtInt(INPUTS.substationCivilM2)} m² of compound for €${fmt(INPUTS.substationCivilCostM, 1)}m over ${INPUTS.substationCivilMonths} months, ${INPUTS.substationEquipmentBases} equipment bases, ${INPUTS.substationMastBases} mast bases, ${INPUTS.substationCableTroughM} m of glass-fibre-reinforced cable troughing with trafficable covers, and two bunds holding ${fmtInt(INPUTS.substationTransformerMassKg)} kg transformers with ${fmtInt(INPUTS.substationTransformerOilL)} litres of oil. Concrete, on the critical path of everything else.`,
+        focus: ['sub.platform', 'sub.xfmr', 'sub.control', 'sub.bay'],
+        look: ['sub.xfmr'],
+        mode: 'power',
+        camera: { pos: [470, 120, 190], target: [330, 6, 20] },
+        evidence:
+          'PUBLIC FACT: JP-SUB — civil and structural package figures above; EIR-AR2017 — energisation in August 2017.',
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- 2 power */
+  {
+    id: 'power',
+    title: 'Following the electrons',
+    blurb: 'One unbroken path from the 220 kV loop-in to a single rack, and what each step down in voltage is actually for.',
+    classificationHint:
+      'PUBLIC FACT for the connection, the transformer count, the 20 kV underground cables and the rack power density; every voltage step between the substation and the rack, and the whole of the switchgear architecture, is TYPICAL.',
+    steps: [
       {
         title: 'The grid exit point',
-        body: 'A dedicated GXP in the north-east: a crushed-rock platform, transformers, switchyard bays, gantries and a control building, inside a 2.5 m fence. This is where the campus stops being a customer of the network and becomes part of it.',
-        focus: ['gxp.platform', 'gxp.xfmr', 'gxp.bay', 'gxp.ctrl'],
-        look: ['gxp.xfmr'],
+        body:
+          'Everything the campus consumes arrives at one place. A 220 kV loop-in brings power into the compound, and from the first breaker inward this is a private electrical system: the campus owns the protection, the switching strategy and the earthing for everything inside the fence. Nothing here comes from the distribution network, and nothing upstream of the yard can be repaired by anyone working on this site.',
+        focus: ['hv.line', 'sub.bay'],
+        look: ['sub.bay'],
         mode: 'power',
-        camera: { pos: [520, 190, -320], target: [300, 12, -140] },
-        evidence: 'PUBLIC FACT: ~4 ha, buildings under 10 m, gantries to 24 m, 50 m towers. NOT PUBLIC: transformer ratings, count, or switching scheme.',
+        camera: { pos: [560, 130, -160], target: [364, 11, -44] },
       },
       {
-        title: 'High voltage becomes medium voltage',
-        body: 'The transformers step transmission voltage down to the campus MV level. They do not create energy — they trade voltage for current, and about 1% of what passes through leaves as heat in the transformer itself.',
-        focus: ['gxp.xfmr', 'gxp.bay'],
-        look: ['gxp.xfmr'],
+        title: `${INPUTS.transmissionKv} kV becomes ${INPUTS.campusMvKv} kV`,
+        body: `Three transformers, ${INPUTS.transmissionKv} kV to ${INPUTS.campusMvKv} kV. They create no energy; they trade voltage for current and lose roughly one per cent of what passes through as heat, which is why a transformer is a piece of cooling plant as much as a piece of electrical plant. Three at ${A('transformerMva')} MVA give ${fmt(derived.transformerTotalMva, 0)} MVA against ${fmt(derived.itCapacityMW, 0)} MW of consented IT load, and the loss of any one of them is a campus-scale event rather than an equipment event.`,
+        focus: ['sub.xfmr'],
+        look: ['sub.xfmr'],
         mode: 'power',
+        camera: { pos: [348, 44, 116], target: [296, 8, 34] },
         view: { flows: true },
-        evidence: 'TYPICAL: the voltage step shown. The project publishes that transformers exist, not what they are rated at.',
       },
       {
-        title: 'MV distribution to the modules',
-        body: 'Campus MV switchgear splits the supply into per-module lineups and then per-hall feeders. Every feeder needs to be measurable and switchable, because this is where load gets shed when generation is short.',
-        focus: ['M1.mv', 'M2.mv', 'M3.mv'],
-        look: ['M1.mv'],
+        title: 'The underground run',
+        body: `The campus distribution is ${INPUTS.campusMvKv} kV cable in the ground, and every building has its own medium-voltage arrival. Inside the building the lineup is typical rather than published: an incomer per supply, split bus sections, per-hall feeders. Splitting the bus is the point. It is what stops a fault in one hall from propagating into four, and it is the first place on this tour where a redundancy claim can be checked by walking two paths and listing what they share.`,
+        focus: ['sub.mvb', 'CLN1.mv'],
+        look: ['CLN1.mv'],
         mode: 'power',
-        camera: { pos: [-40, 300, 330], target: [-49, 8, 60] },
-        evidence: 'TYPICAL: dual incomer with split bus sections. The public record confirms the campus has its own electrical services, not the topology.',
+        camera: { pos: [-104, 66, -148], target: [-192, 6, -232] },
+        view: { flows: true, isolateHall: CLN1 },
+        evidence:
+          'PUBLIC FACT: MCC-150605 — underground 20 kV cables between the substation and the buildings. TYPICAL: incomer arrangement, bus splitting and per-hall feeders.',
       },
       {
-        title: 'Unit substations, then UPS',
-        body: 'Each hall has its own MV-to-LV transformers, so a failure affects one hall rather than the campus. The LV then feeds the UPS, which is the only thing between a grid disturbance and a crashed server.',
-        focus: ['M1-W.sub', 'M1-W.upsA', 'M1-W.upsB', 'M1-W.batt'],
-        look: ['M1-W.upsA'],
+        title: 'Down to low voltage, through the UPS',
+        body:
+          'Two unit substations take the medium voltage down to low voltage on the north face of the building, and low voltage feeds two uninterruptible power supplies, a battery set and a distribution board. The A and B split is the second place where redundancy has been bought with money. Like every other, it is only real if the two paths are genuinely independent: shared batteries, shared ventilation or a shared cable trench quietly turn a 2N claim back into an N.',
+        focus: ['CLN1.sub', 'CLN1.upsA', 'CLN1.upsB', 'CLN1.batt', 'CLN1.lv'],
+        look: ['CLN1.upsA'],
         mode: 'power',
-        camera: { pos: [-180, 90, -30], target: [-306, 8, -20] },
-        view: { roofOff: true, cutaway: true },
-        evidence: 'NOT PUBLIC: UPS topology, redundancy and autonomy. The A/B pair shown is TYPICAL.',
+        camera: { pos: [-326, 58, -124], target: [-366, 6, -212] },
+        view: { roofOff: true, isolateHall: CLN1 },
+        evidence:
+          'PUBLIC FACT: batteries are present and are a fire hazard (EPA-P1192). NOT PUBLIC: UPS topology, redundancy level, autonomy or battery chemistry. The A/B arrangement is TYPICAL.',
       },
       {
-        title: 'Busway, PDU, rack, server',
-        body: 'Busway runs above the aisles. Rack PDUs convert three-phase into the single-phase circuits servers actually take — normally two, A and B, each able to carry the rack alone. Then it is just current into a power supply, and the power supply turns it into heat.',
-        focus: ['M1-W.bus', 'M1-W.pdu', 'M1-W.rack', 'M1-W.gpu'],
-        look: ['M1-W.rack'],
+        title: 'Busway, tap-off, rack',
+        body: `Busway runs above the rows, tapped down to rack power distribution units, which turn three-phase into the single-phase circuits the servers actually take. At the delivered rack power of ${fmt(INPUTS.deliveredRackKw, 1)} kW that is about ${fmt(derived.deliveredRackAmps, 1)} A per rack at ${INPUTS.buswayVolts} V. Nothing in this stretch of the chain stores anything; it exists to deliver power to the rack without a single joint that can open and take a whole row with it.`,
+        focus: ['CLN1.lv', 'CLN1.h1.bus', 'CLN1.h1.pdu', 'CLN1.h1.rack', 'CLN1.h1.server'],
+        look: ['CLN1.h1.rack'],
         mode: 'power',
-        camera: { pos: [-280, 42, -70], target: [-306, 6, -8] },
-        view: { roofOff: true, cutaway: true, follow: 'grid' },
-        evidence: 'TYPICAL: the 400/415 V to 230 V step and the A/B feed convention. Rack-level power design is not public.',
+        camera: { pos: [-330, 34, -62], target: [-420, 5, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN1 },
       },
       {
-        title: 'Where the electricity went',
-        body: 'Everything that entered the rack leaves as heat, minus a few per cent of conversion losses in the power supplies. The next journey follows that heat.',
-        focus: ['M1-W.gpu', 'M1-W.cold'],
-        look: ['M1-W.gpu'],
-        mode: 'cooling',
-        camera: { pos: [-250, 50, -60], target: [-306, 5, -8] },
-        view: { roofOff: true, cutaway: true, follow: 'heat' },
+        title: '230 volts, single phase',
+        body:
+          'Into the server power supplies, and there the chain ends. Two supplies per machine, each able to carry it alone, fed from the two rack feeds. This is the only point on the whole route where electricity becomes information, and the only one where the voltage is low enough that a person with a hand tool is a credible cause of failure. Faults are cheap here because the load is small, and expensive everywhere upstream because it is not.',
+        focus: ['CLN1.h1.pdu', 'CLN1.h1.rack', 'CLN1.h1.server'],
+        look: ['CLN1.h1.server'],
+        mode: 'power',
+        camera: { pos: [-372, 18, -110], target: [-420, 3, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN1 },
+        evidence: 'TYPICAL: the 415 V to 230 V step and the A/B feed convention at the rack. Not published for Clonee.',
       },
     ],
   },
-  {
-    id: 'generators',
-    title: 'Why does a data centre need 84 generators?',
-    blurb: 'Work the arithmetic on a public number and see where the margin really goes.',
-    classificationHint:
-      'PUBLIC FACT: 84 sets, 3,200 kWe each, six blocks of 14, 3.2 MW of rated capacity each. The reasoning below is TYPICAL engineering interpretation.',
-    steps: [
-      {
-        title: 'Six blocks of fourteen',
-        body: 'Generators sit in blocks inside the module rectangles, adjacent to the halls, with the halls acting as noise screens. Refuelling is by tanker on the internal roads, tank by tank.',
-        focus: ['M1-W.gen', 'M1-W.fuel', 'M1-E.gen'],
-        look: ['M1-W.gen'],
-        mode: 'power',
-        camera: { pos: [-245, 150, 240], target: [-245, 6, 0] },
-        evidence: 'PUBLIC FACT: 84 sets in six blocks of 14; 10,000 L belly tank each; individually refuelled; bundled with full-retention separators and automatic shutoff.',
-      },
-      {
-        title: 'The arithmetic',
-        body: '84 x 3,200 kW = 268.8 MW of rated generation. The consented IT capacity is up to 240 MW. So the fleet is only about 1.1x the IT load — and the mechanical plant, lighting and controls have to be fed from the same fleet.',
-        focus: ['gxp.xfmr', 'M1.mv'],
-        look: ['M1.mv'],
-        mode: 'power',
-        camera: { pos: [-245, 320, 420], target: [-245, 6, 30] },
-        evidence: 'SIMPLIFIED arithmetic on PUBLIC FACT inputs. It is a legitimate check, and it is not a redundancy margin you can bank on.',
-      },
-      {
-        title: 'Why not 2N on generation?',
-        body: 'Because 2N on 240 MW would mean roughly 480 MW of generation. Industry experience is that a very large standby fleet brings its own failure modes: more machinery, more starting reliability risk, more controls to fail, more of the plant held out for maintenance at any moment.',
-        focus: ['M1-W.gen'],
-        look: ['M1-W.gen'],
-        mode: 'resilience',
-        evidence: 'TYPICAL: the trade-off is well documented in industry generator-plant studies, but no such study is public for this project.',
-      },
-      {
-        title: 'So what carries the margin?',
-        body: 'Several things at once: block architecture with a defined allocation, staged starts, tested step-load acceptance, an explicit priority-based shed sequence, and maintenance done in blocks with the fleet temporarily de-rated. This is a maintenance and operations problem as much as a design problem.',
-        focus: ['M1-W.gen', 'M1.mv', 'M1-W.upsA'],
-        look: ['M1-W.gen', 'M1.mv'],
-        mode: 'power',
-        evidence: 'NOT PUBLIC: the actual redundancy architecture, block allocation, step-load criteria or fuel autonomy.',
-      },
-      {
-        title: 'And the heat',
-        body: 'Each set releases about 5.3 MW of heat - 445 MW across the fleet, nearly twice the IT load. But that heat does not go through the data centre cooling plant. Each set rejects it through its own radiators, jacket-water coolers, aftercoolers and exhaust, straight to ambient air. The campus has two separate heat rejection problems and it is easy to conflate them.',
-        focus: ['M1-W.gen', 'M1-W.genheat', 'site.ambient'],
-        look: ['M1-W.genheat'],
-        mode: 'cooling',
-        camera: { pos: [-245, 95, -215], target: [-245, 6, -60] },
-        evidence: 'PUBLIC FACT: 5.3 MW heat per set, 445.2 MW total. TYPICAL: how that heat is actually rejected, and that it is independent of the IT cooling loop.',
-      },
-    ],
-  },
-  {
-    id: 'gridfail',
-    title: 'What happens when grid power fails?',
-    blurb: 'Run the emergency sequence, stage by stage, on the model.',
-    classificationHint:
-      'The sequence is TYPICAL industry practice. The timing bands are illustrative, not specification values, and no acceptance criterion is invented here.',
-    steps: [
-      {
-        title: 'Normal utility supply',
-        body: 'Grid carries everything. Generators on standby, batteries maintained, fuel topped up, coolant systems pre-circulating. Use the animated sequence in the panel to step through the event.',
-        focus: ['hv.line', 'gxp.xfmr', 'M1.mv', 'M1-W.gen'],
-        look: ['M1-W.gen'],
-        mode: 'power',
-        camera: { pos: [120, 380, 520], target: [-60, 8, 0] },
-      },
-      {
-        title: 'The grid opens',
-        body: 'Protection clears the fault and the campus is islanded with no source. Everything now depends on what is stored on site.',
-        focus: ['hv.line', 'gxp.bay'],
-        look: ['gxp.bay'],
-        mode: 'power',
-        camera: { pos: [520, 220, -260], target: [300, 12, -140] },
-      },
-      {
-        title: 'The UPS buys time',
-        body: 'The inverter keeps the IT supply inside tolerance with no input at all. This ride-through is the number the whole emergency design is built around: it must exceed generator start plus synchronisation plus transfer, with margin.',
-        focus: ['M1-W.upsA', 'M1-W.batt'],
-        look: ['M1-W.upsA'],
-        mode: 'power',
-        camera: { pos: [-210, 80, -10], target: [-290, 8, -20] },
-        view: { roofOff: true },
-        evidence: 'NOT PUBLIC: autonomy time. Do not accept a number that has not been tested on load banks.',
-      },
-      {
-        title: 'Generators start, in sequence',
-        body: 'Staged starts, not a thundering herd. Each engine accelerates, catches, builds voltage and frequency, then closes onto the emergency bus.',
-        focus: ['M1-W.gen', 'M2-E.gen', 'M3-W.gen'],
-        look: ['M1-W.gen'],
-        mode: 'power',
-        camera: { pos: [-245, 200, 320], target: [-245, 6, 0] },
-      },
-      {
-        title: 'Transfer, then restart the plant',
-        body: 'Critical load transfers to generation, UPS batteries start recharging, and mechanical plant restarts in an ordered sequence — cooling for live halls first.',
-        focus: ['M1.mv', 'M1.cool', 'M1.hx'],
-        look: ['M1.cool'],
-        mode: 'cooling',
-        camera: { pos: [-245, 170, -230], target: [-245, 8, -100] },
-      },
-      {
-        title: 'Utility restored, deliberately',
-        body: 'Returning to a network that has just failed is a decision, not an event. Some operators wait for a defined period of stability. Generators then cool, run unloaded, stop and return to standby.',
-        focus: ['gxp.bay', 'gxp.xfmr'],
-        look: ['gxp.xfmr'],
-        mode: 'power',
-        camera: { pos: [520, 200, -300], target: [300, 12, -140] },
-      },
-    ],
-  },
+
+  /* ----------------------------------------------------------------- 3 heat */
   {
     id: 'heat',
-    title: 'Where does the heat from AI computing go?',
-    blurb: 'Start inside a silicon package and follow the energy all the way out of the building.',
+    title: 'Where the heat goes',
+    blurb:
+      'Indirect air cooling, told honestly: the IT air never touches water, and the campus carries two separate heat rejection problems.',
     classificationHint:
-      'PUBLIC FACT: water-glycol cold plates carry 70-80% of the heat, the remainder leaves as hot air, and the warmed liquid is cooled by outdoor air over a sprayed membrane down to 15-20 C. Everything in between the hall and the plant is TYPICAL.',
+      'PUBLIC FACT for indirect air cooling and for the residual evaporative cooling-water discharge; TYPICAL and DERIVED for the coils, the air coolers, the plume and the comparison with tower and liquid cooling.',
     steps: [
       {
-        title: 'It starts in the silicon',
-        body: 'An AI accelerator is roughly 1 kW of electrical power in a package a couple of centimetres across. Almost none of that energy becomes useful computation — nearly all of it is heat that has to be carried off the die.',
-        focus: ['M1-W.gpu'],
-        look: ['M1-W.gpu'],
+        title: 'It all leaves as heat',
+        body:
+          'Essentially all the electrical power entering a server leaves it as heat, because there is no useful work to keep. On this campus that heat leaves the rack into air. The halls as delivered are indirectly air cooled, which is stated in the contractor\u2019s architect record, and the consequence is worth stating plainly: there is no coolant circuit anywhere inside the white space of a delivered Clonee hall. Nothing to leak, and nothing to retrofit.',
+        focus: ['CLN1.h1.rack', 'CLN1.h1.server'],
+        look: ['CLN1.h1.server'],
         mode: 'cooling',
-        camera: { pos: [-280, 26, -34], target: [-306, 4, -8] },
-        view: { roofOff: true, cutaway: true, follow: 'heat' },
-        evidence: 'TYPICAL: the 1 kW-class die figure is an industry reference point for current accelerators, not a project figure.',
+        camera: { pos: [-372, 18, -110], target: [-420, 3, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN1 },
+        evidence: 'PUBLIC FACT: SNWA-FB — IT cooling by indirect air cooling.',
       },
       {
-        title: 'Cold plate',
-        body: 'A copper plate with channels inside is clamped to the die. Coolant runs through it and the heat leaves the silicon by conduction into water rather than by convection into air. Public documents put this at 70-80% of the heat for this facility.',
-        focus: ['M1-W.cold', 'M1-W.gpu'],
-        look: ['M1-W.cold'],
+        title: 'In-hall air cooling',
+        body: `Each hall carries ${fmt(derived.hallItMW, 0)} MW of consented IT load over about ${fmtInt(INPUTS.hallFloorM2)} m², which is ${fmt(derived.hallPowerDensityFromConsentKwM2, 2)} kW/m². The published campus figure is ${INPUTS.itPowerDensityKwM2} kW/m², reached by a completely independent route, and the two agree to within ${fmt(derived.densityAgreementPct, 1)}%. In-hall units move that air across coils inside the white space. This is a design that works comfortably at ${fmt(INPUTS.deliveredRackKw, 1)} kW per rack and runs out of road well before that.`,
+        focus: ['CLN1.h1.crah', 'CLN1.h1.rack'],
+        look: ['CLN1.h1.crah'],
         mode: 'cooling',
-        camera: { pos: [-292, 18, -30], target: [-306, 3, -8] },
-        view: { roofOff: true, cutaway: true, follow: 'heat' },
-        evidence: 'PUBLIC FACT: 70-80% of heat via water-glycol plates on the accelerators.',
+        camera: { pos: [-338, 26, -78], target: [-420, 4, -162] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN1 },
       },
       {
-        title: 'Rack manifold, then the CDU',
-        body: 'Warm coolant returns from the rack to a coolant distribution unit. The CDU is the membrane between clean technology coolant and building water: a heat exchanger, redundant pumps, filtration, leak detection and a control loop holding supply temperature above the room dew point.',
-        focus: ['M1-W.cold', 'M1-W.cdu'],
-        look: ['M1-W.cdu'],
+        title: 'Across the coil to the facility loop',
+        body:
+          'Heat crosses a coil into water and nothing mixes. The in-hall air is the IT equipment\u2019s problem; the facility water loop is the building\u2019s problem; the heat exchanger is the boundary between them, and therefore the boundary that keeps glycol and water treatment chemicals out of a room full of electronics. The skids sit in the plant corridor along the north face, one set of them serving all four halls in the bar.',
+        focus: ['CLN1.h1.crah', 'CLN1.hx'],
+        look: ['CLN1.hx'],
         mode: 'cooling',
-        camera: { pos: [-240, 40, -60], target: [-305, 4, -10] },
-        view: { roofOff: true, cutaway: true, follow: 'heat' },
-        evidence: 'TYPICAL: whether CDUs are used and how they are arranged is not public. The dew-point rule and the two-loop separation are industry practice.',
+        camera: { pos: [-250, 40, -150], target: [-320, 6, -242] },
+        view: { isolateHall: CLN1 },
+        evidence: 'TYPICAL: the coil-to-loop arrangement and the single set of skids per building as modelled here.',
       },
       {
-        title: 'The rest of the heat is air',
-        body: 'Power supplies, memory, drives and switchgear still dump heat into air. In-row air handling takes that, because air cooling stops being viable as a primary path somewhere around 50 kW per rack.',
-        focus: ['M1-W.crah', 'M1-W.switch'],
-        look: ['M1-W.crah'],
+        title: 'Out through the air coolers',
+        body:
+          'From the plant corridor the warm water goes to the heat rejection units behind the building, where outdoor air does the work. What is published is indirect air cooling; what the emissions licence refers to is residual evaporative cooling-water discharge. Read the two documents together and the only coherent plant is an evaporative-assisted indirect arrangement: dry air does most of the work, with a wetted stage available when the air is too warm to do it alone.',
+        focus: ['CLN1.hx', 'CLN1.cool'],
+        look: ['CLN1.cool'],
         mode: 'cooling',
-        view: { roofOff: true, cutaway: true, follow: 'heat' },
-        evidence: 'PUBLIC FACT: the remaining heat is captured as hot air and handled by a secondary liquid heat exchanger. NOT PUBLIC: whether CRAH-type units are used.',
+        camera: { pos: [-320, 74, -424], target: [-320, 10, -292] },
+        view: { flows: true, isolateHall: CLN1 },
+        evidence:
+          'PUBLIC FACT: SNWA-FB — indirect air cooling. EPA-P1192 — residual evaporative cooling-water discharge. DERIVED: the reading of the two together. TYPICAL: unit count and layout.',
       },
       {
-        title: 'Into the facility water loop',
-        body: 'Both streams meet heat exchanger skids inside the module. Nothing mixes: the loops exchange heat across a plate.',
-        focus: ['M1.hx', 'M1-W.cdu', 'M1-W.crah'],
-        look: ['M1.hx'],
-        mode: 'cooling',
-        camera: { pos: [-245, 90, 210], target: [-245, 8, 92] },
-        view: { follow: 'heat' },
+        title: 'The plume',
+        body:
+          'Where the wetted stage runs, the water leaves as vapour carrying the heat it absorbed, and on a hot afternoon you can see it. How large the plume is depends on the weather and the load rather than on a fixed installation, which is why the consent is careful to say that water vapour may be visible rather than committing to a stack or a volume. Everything about the geometry of this plume in the model is derived, and it should not be read as a prediction.',
+        focus: ['CLN1.cool', 'CLN1.plume', 'site.ambient'],
+        look: ['CLN1.plume'],
+        mode: 'water',
+        camera: { pos: [-236, 72, -392], target: [-320, 22, -298] },
+        view: { isolateHall: CLN1 },
       },
       {
-        title: 'Out through the evaporative units',
-        body: 'Public documents describe the final stage: outdoor air drawn over a membrane sprayed with water, evaporation pulling the liquid down to 15-20 C, then recirculation. The water leaves as vapour — which is why the consent decision records that water vapour may be visible near the site.',
-        focus: ['M1.cool', 'site.wtp'],
-        look: ['M1.cool'],
+        title: 'What indirect cooling is not',
+        body: `Two other architectures are worth setting against it. An evaporative tower puts water and air in direct contact in a large tower: efficient in dry climates and several times wetter, which is the wrong trade in a catchment receiving ${fmtInt(A('longTermRainfallMmYr'))} mm of rain a year. Liquid cooling takes heat into a coolant loop at the chip, which is more efficient again but requires a hall designed around it from the slab up. This hall is neither, and that is what the AI journey is about.`,
+        focus: ['CLN1.h1.crah', 'CLN1.cool', 'site.ambient'],
+        look: ['CLN1.cool'],
         mode: 'cooling',
-        camera: { pos: [-245, 120, -240], target: [-245, 10, -118] },
-        view: { follow: 'heat' },
-        evidence: 'PUBLIC FACT: adiabatic cooling, membrane spray, 15-20 C, recirculation, water treatment for legionella, algae and scale. NOT PUBLIC: unit count, airflow, staging or redundancy.',
+        camera: { pos: [-150, 96, -330], target: [-320, 10, -286] },
+        evidence:
+          'TYPICAL: the contrast between indirect air, evaporative tower and liquid cooling. IND-LC for the retrofit discriminator.',
       },
     ],
   },
+
+  /* ---------------------------------------------------------------- 4 water */
   {
     id: 'water',
-    title: 'Why does a data centre need water?',
-    blurb: 'Make the water balance legible instead of drawing blue pipes.',
+    title: 'The water licence in the wettest country in Europe',
+    blurb:
+      'Why a data centre in County Meath holds a discharge licence at all, and what the water balance actually looks like once you do the arithmetic.',
     classificationHint:
-      'PUBLIC FACT for every quantity shown: 288,000 m3/yr demand, 75,000 m3 storage, 75,000 m3/yr captured, 7 L/s take, 157,000 m3/yr recharge, 150 m3 potable, 5,000 L/day wastewater. Blowdown is not published and is labelled TYPICAL.',
+      'PUBLIC FACT for the licence, the evaporative discharge reference and the stormwater systems; DERIVED for every volume and intensity shown, from published inputs and stated assumptions.',
     steps: [
       {
-        title: 'Where water comes in',
-        body: 'Rain onto about 95,000 m2 of roof and hardstand, captured at roughly 75,000 m3 a year — about 13% of the site rainfall. The rest of the balance is groundwater from a bore field, used only when the tanks are not refilled by rain.',
-        focus: ['site.bore', 'M1-W.res', 'M1-E.res'],
+        title: 'Why a discharge licence at all',
+        body:
+          'A data centre in County Meath holds a wastewater discharge licence, which sounds wrong until you understand the climate. Ireland has almost no cooling degree days. The outside air is cool enough to carry the whole heat load for most of the year, so the wetted stage runs wet only in the hottest hours of the hottest days. The licence exists because the plant runs wet sometimes, not because it runs wet continuously, and the model treats it that way.',
+        focus: ['CLN1.cool', 'site.ambient'],
+        look: ['CLN1.cool'],
+        mode: 'water',
+        camera: { pos: [-320, 74, -424], target: [-320, 10, -292] },
+        evidence:
+          'PUBLIC FACT: EPA-P1192 — residual evaporative cooling-water discharge. TYPICAL: the cooling-degree-day argument and the assumed evaporative fraction of 0.1.',
+      },
+      {
+        title: 'Rain first, and there is a lot of it',
+        body: `Rain falling on ${fmt(INPUTS.siteAreaHa, 1)} hectares of site, of which about ${fmtInt(derived.imperviousAreaM2)} m² is roof or hardstand, amounts to roughly ${fmtInt(derived.rainfallVolumeM3Yr)} m³ a year. The attenuation basin collects the runoff from the impervious area and, where the quality allows, sends it to the cooling loop as make-up: about ${fmtInt(derived.runoffCaptureM3Yr)} m³ a year, or ${fmt(derived.captureFractionOfRainfall * 100, 0)}% of everything that lands on the site. This is the cheapest water on the campus, and it is why the site is so much larger than the buildings.`,
+        focus: ['site.basin', 'site.wtp'],
+        look: ['site.basin'],
+        mode: 'water',
+        camera: { pos: [-40, 128, 540], target: [-230, 0, 380] },
+        view: { flows: true },
+      },
+      {
+        title: 'The wellfield closes the gap',
+        body: `Harvested rainfall covers about ${fmt(derived.groundwaterCoverage * 100, 0)}% of the annual cooling demand. The rest — around ${fmtInt(derived.supplyGapM3Yr)} m³ a year, which is what a dry summer takes — comes from groundwater. A small production wellfield averaging roughly ${fmt(derived.borefieldLPerSecond, 1)} litres a second closes that gap across a year and is deliberately capable of more when the basin is empty. In a moderate rainfall catchment like County Meath this plant does real work rather than sitting as a contingency.`,
+        focus: ['site.bore', 'site.wtp'],
         look: ['site.bore'],
         mode: 'water',
-        camera: { pos: [-520, 220, 120], target: [-300, 0, 40] },
-        evidence: 'PUBLIC FACT: capture areas and volumes; 7 L/s, 604,800 L/day, 220,752,000 L/yr consented take.',
+        camera: { pos: [572, 128, 470], target: [370, 0, 300] },
+        view: { flows: true },
       },
       {
-        title: 'Storage under the buildings',
-        body: 'About 75,000 m3 in sealed reservoirs 1.5-2.0 m below ground level beneath the halls — roughly 1.5 months of contingency, and a wet winter can be banked for a dry summer.',
-        focus: ['M1-W.res', 'M2-E.res'],
-        look: ['M1-W.res'],
-        mode: 'water',
-        camera: { pos: [-180, 120, -40], target: [-306, -3, 0] },
-        view: { explode: 0.35 },
-        evidence: 'PUBLIC FACT: volume, depth, sealed against groundwater, uplift is a building-consent issue.',
-      },
-      {
-        title: 'Most of it becomes vapour',
-        body: 'The plant is evaporative, so the demand is largely water turned into vapour carrying heat away. That makes water-per-unit-of-compute a direct measure of the cooling architecture.',
-        focus: ['M1.cool'],
-        look: ['M1.cool'],
-        mode: 'water',
-        camera: { pos: [-245, 100, -220], target: [-245, 12, -118] },
-        evidence: `SIMPLIFIED arithmetic on published inputs: ${waterIntensitySentence()}`,
-      },
-      {
-        title: 'Water treatment is a licence and a safety issue',
-        body: 'Public documents are explicit that the water must be disinfected against legionella, algae and scale, and that chemicals are delivered on demand and injected in purpose-built plant rooms rather than stored in bulk. That is a safety control, not housekeeping.',
-        focus: ['site.wtp', 'M1-W.res'],
-        look: ['site.wtp'],
-        mode: 'water',
-        camera: { pos: [220, 120, 330], target: [120, 6, 232] },
-      },
-      {
-        title: 'What leaves the site',
-        body: 'The site does not simply discharge to the stream. Treated stormwater is recharged into the aquifer deliberately — around 157,000 m3 a year — because the groundwater regime supports a wetland to the south that the project has a consent obligation to protect.',
-        focus: ['site.basin', 'site.wetland'],
-        look: ['site.wetland'],
-        mode: 'water',
-        camera: { pos: [120, 200, 620], target: [20, 0, 400] },
-        evidence: 'PUBLIC FACT: recharge volumes, wetland obligation, 1% AEP overtop flow path south.',
-      },
-      {
-        title: 'And the small streams',
-        body: 'Potable water is about 150 m3 of storage from 3,000 m2 of roof, and wastewater is up to 5,000 litres a day to a soakage field. Both are sized for a workforce of around 60 — three orders of magnitude smaller than the cooling stream, in the same campus.',
-        focus: ['site.potable', 'site.ww'],
-        look: ['site.potable'],
-        mode: 'water',
-        camera: { pos: [-120, 120, 400], target: [40, 4, 250] },
-        evidence: 'PUBLIC FACT: 150 m3 tank; 5,000 L/day to land at 5 mm/day; 3,360 m2 soakage field including reserve.',
-      },
-    ],
-  },
-  {
-    id: 'capacity',
-    title: 'What does a 240 MW data centre actually mean?',
-    blurb: 'Separate IT load from total demand from rating from plan value.',
-    classificationHint:
-      'PUBLIC FACT figures include 240 MW IT, 84 x 3,200 kWe generation and 445.2 MW of generator heat release. The module split in this model is SIMPLIFIED. Generator heat is rejected by the generator cooling systems, not by the IT cooling plant.',
-    steps: [
-      {
-        title: '240 MW is the IT load',
-        body: 'Consented capacity is the electrical load of servers, storage and network equipment. It is not the campus total. Cooling plant, fans, pumps, lighting and controls add to it, and the losses in every conversion stage sit on top.',
-        focus: ['M1-W.gpu', 'M1-W.rack'],
-        look: ['M1-W.gpu'],
-        mode: 'power',
-        camera: { pos: [-245, 330, 400], target: [-245, 6, 0] },
-        evidence: 'PUBLIC FACT: 240 MW IT in the consent decision and application documents.',
-      },
-      {
-        title: 'Another number is in circulation',
-        body: 'A higher figure also circulates publicly. The documents do not reconcile the two, and this application deliberately does not pick one silently. Possible explanations include a total facility demand, a later planning figure, or a different definition of capacity.',
-        focus: ['M1-W.gpu', 'M1.cool'],
-        look: ['M1.cool'],
-        mode: 'power',
-        evidence: 'PUBLIC FACT that both numbers are public; the discrepancy is unresolved in the public record.',
-      },
-      {
-        title: 'Six halls, three modules, six blocks',
-        body: 'The physical count is public: six data halls across three modules, ~9.5 ha. Each hall is a self-contained electrical, cooling and network domain — a fault domain and a delivery module at the same time.',
-        focus: ['M1-W.hall', 'M2-W.hall', 'M3-E.hall'],
-        look: ['M2-W.hall'],
-        mode: 'overview',
-        camera: { pos: [520, 420, 700], target: [-49, 6, 0] },
-        evidence: 'PUBLIC FACT: six halls, three modules, ~9.5 ha, ~8,210 m2 per hall in phase 1.',
-      },
-      {
-        title: 'Where the heat rejection capacity comes from',
-        body: 'Public fact: 5.3 MW of heat per generator, 445.2 MW across the fleet. The trap is assuming the IT cooling plant has to deal with it. It does not: the sets have their own radiators, jacket water, aftercoolers and exhaust. What the campus does need is for that engine heat to have somewhere to go - space, airflow and stack capacity - while the fleet runs.',
-        focus: ['M1-W.gen', 'M1-W.genheat', 'site.ambient'],
-        look: ['M1-W.genheat'],
+        title: 'The wetted stage, quantified',
+        body: `The campus rejects about ${fmtInt(derived.itHeatGjPerYear)} GJ of IT heat a year, because all ${fmtInt(derived.itMwhPerYear)} MWh of IT energy ends up as heat. Taking a tenth of that by evaporation — the fraction an Irish climate actually supports — gives roughly ${fmtInt(derived.evaporationM3Yr)} m³ of water a year, with a further ${fmtInt(derived.blowdownM3Yr)} m³ of blowdown to carry concentrated solids away. The total site water discharge is about ${fmtInt(derived.dischargeM3Yr)} m³ a year.`,
+        focus: ['CLN1.cool', 'site.wtp', 'CLN1.hx'],
+        look: ['CLN1.cool'],
         mode: 'cooling',
-        camera: { pos: [-245, 170, 300], target: [-245, 8, 0] },
+        camera: { pos: [-236, 72, -392], target: [-320, 22, -298] },
+        view: { flows: true, isolateHall: CLN1 },
+        evidence:
+          'DERIVED: evaporation, blowdown and discharge from published IT energy plus the stated evaporative fraction and blowdown factor. No volume is published for Clonee.',
+      },
+      {
+        title: 'Water per unit of work',
+        body: `Divide the discharge by the energy and the figure worth remembering appears. ${waterIntensitySentence()} It is a direct measure of the cooling architecture, which is why it is worth arguing about: an evaporative tower on the same campus would be several times higher.`,
+        focus: ['CLN1.cool', 'CLN1.plume', 'site.ambient'],
+        look: ['CLN1.plume'],
+        mode: 'water',
+        camera: { pos: [180, 210, -320], target: [-320, 26, -298] },
+        evidence: 'DERIVED, shown in the water panel from the same inputs. TYPICAL: the comparison with evaporative tower cooling.',
+      },
+      {
+        title: 'What else leaves the site',
+        body:
+          'Domestic water is a completely different order of magnitude. Potable tanks serve the administration and staff amenities, a small treatment plant deals with the foul flow, and it is discharged to ground. A campus of this size generates domestic wastewater measured in litres a day, while the cooling stream is measured in hundreds of thousands of cubic metres a year. Same site, same licence, same outfall route, two entirely separate problems.',
+        focus: ['site.potable', 'site.ww', 'site.watercourse'],
+        look: ['site.ww'],
+        mode: 'water',
+        camera: { pos: [186, 78, 452], target: [150, 4, 352] },
+        evidence:
+          'PUBLIC FACT: EPA-P1192 — stormwater and environmental systems on the campus. TYPICAL: potable, foul and soakage arrangements. The consent record does not publish a domestic flow.',
       },
     ],
   },
-  {
-    id: 'hall',
-    title: 'How is a data hall constructed?',
-    blurb: 'Walk one hall from ground to racks, and see what is cast into the slab.',
-    classificationHint:
-      'PUBLIC FACT for the footprint, height, phase split and roof-water capture. TYPICAL for the internal arrangement.',
-    steps: [
-      {
-        title: 'It starts below the floor',
-        body: 'Public fact: about 75,000 m3 of sealed cooling water storage sits in reservoirs 1.5-2.0 m below ground level beneath the buildings. The reservoir is cast and waterproofed before the hall above it exists, and the hall above it is designed around it.',
-        focus: ['M1-W.res', 'M1-W.hall'],
-        look: ['M1-W.res'],
-        mode: 'construction',
-        camera: { pos: [-160, 150, -80], target: [-306, -3, 0] },
-        view: { explode: 0.6, roofOff: true },
-        evidence: 'PUBLIC FACT: volume, depth, sealed, uplift is a building-consent issue.',
-      },
-      {
-        title: 'Platform, slab, then frame',
-        body: 'Bulk earthforms platforms and road corridors; imported aggregate builds subbase, foundations and the substation platform. Foundations and slabs follow, then the frame, then the envelope. Weather-tight is a real milestone because it unblocks every internal trade.',
-        focus: ['M1-W.hall'],
-        look: ['M1-W.hall'],
-        mode: 'construction',
-        camera: { pos: [-160, 130, -110], target: [-306, 6, 0] },
-        view: { roofOff: true },
-      },
-      {
-        title: 'Roof drainage is a water system',
-        body: 'About 30,000 m2 of hall roof across the site is piped into the cooling water reservoirs. Roof, pipework and reservoir are one hydraulic system, and that single decision is why cooling water is cheap here.',
-        focus: ['M1-W.hall', 'M1-W.res'],
-        look: ['M1-W.res'],
-        mode: 'construction',
-        evidence: 'PUBLIC FACT: ~30,000 m2 of hall roof captured to the reservoirs.',
-      },
-      {
-        title: 'Fitout order matters',
-        body: 'Containment and cabling, then electrical containment, switchgear and UPS, then busway, then cooling distribution, then controls, then racks. A hall is commissioned and energised as a unit; it does not wait for the campus.',
-        focus: ['M1-W.bus', 'M1-W.cdu', 'M1-W.rack', 'M1-W.upsA'],
-        look: ['M1-W.rack'],
-        mode: 'construction',
-        camera: { pos: [-210, 80, -60], target: [-306, 5, 0] },
-        view: { roofOff: true, cutaway: true },
-      },
-    ],
-  },
-  {
-    id: 'commission',
-    title: 'How do you commission a data centre?',
-    blurb: 'See why the testing programme is longer than the equipment list suggests.',
-    classificationHint:
-      'TYPICAL commissioning practice, following the standard Level 1 to Level 5 structure. Durations in this application are SYNTHETIC and indicative; no real project programme is reproduced.',
-    steps: [
-      {
-        title: 'Five levels, each a gate',
-        body: 'Factory test, installation checks, pre-functional and energisation, functional performance, then integrated systems testing. Each level is signed off before the next begins, which is why a small defect at Level 1 stops everything behind it.',
-        focus: ['gxp.xfmr', 'M1-W.upsA', 'M1.cool'],
-        look: ['M1-W.upsA'],
-        mode: 'commissioning',
-        camera: { pos: [80, 380, 460], target: [-49, 8, 0] },
-      },
-      {
-        title: 'You cannot test what you cannot load',
-        body: 'There are no servers during commissioning, so the design load has to be manufactured: electrical load banks pull design kW and kVA, thermal load banks put heat into the white space. Testing at no load proves almost nothing.',
-        focus: ['M1-W.rack', 'M1.cool'],
-        look: ['M1-W.rack'],
-        mode: 'commissioning',
-        camera: { pos: [-230, 60, -40], target: [-306, 5, -8] },
-        view: { roofOff: true, cutaway: true },
-      },
-      {
-        title: 'Prove the seams, not just the parts',
-        body: 'Every system can pass on its own and the facility can still fail. Integrated systems testing runs the whole plant at design load and then pulls the utility, fails a generator, a pump and a cooling unit, on purpose.',
-        focus: ['M1-W.gen', 'M1.mv', 'M1-W.upsA', 'M1.cool', 'M1.pump'],
-        look: ['M1.mv'],
-        mode: 'commissioning',
-        camera: { pos: [-245, 220, 320], target: [-245, 8, 0] },
-      },
-      {
-        title: 'Evidence, not opinion',
-        body: 'Every passed scenario is annotated with the load used to prove it, and every deficiency is tracked to closure. "IT did not crash" is not an acceptance result; a measured ride-through time against a written criterion is.',
-        focus: ['M1-W.upsA', 'M1-W.batt'],
-        look: ['M1-W.batt'],
-        mode: 'commissioning',
-        camera: { pos: [-250, 50, -10], target: [-306, 5, -20] },
-        view: { roofOff: true },
-      },
-    ],
-  },
+
+  /* --------------------------------------------------------------- 5 fibre */
   {
     id: 'fibre',
-    title: 'How does fibre reach the servers?',
-    blurb: 'From the sea bed to a top-of-rack switch, and what an AI workload actually does on arrival.',
+    title: 'How fibre reaches Clonee',
+    blurb:
+      'An overland campus rather than a subsea landing, and why two diverse terrestrial routes plus meet-me rooms per building are the standard requirement.',
     classificationHint:
-      'PUBLIC FACT: a submarine cable from Australia, landfall at a southern beach, a landing station on site sized for up to three cables, two diverse terrestrial routes, and a ring topology. The fabric design is TYPICAL.',
+      'DERIVED for the overland character and the route geometry; PUBLIC FACT for two meet-me rooms per building; TYPICAL for the fabric hierarchy, which is not published for Clonee.',
     steps: [
       {
-        title: 'It comes out of the ocean',
-        body: 'A submarine cable from Australia makes landfall at a beach about 9 km from the campus. Public documents describe the bulkhead, beach manhole, ducting, and trenching to an exchange.',
+        title: 'Overland, not out of the sea',
+        body:
+          'Clonee is not a subsea landing. There is no wet plant on this site and no beach manhole a few kilometres away: this is an overland fibre campus, fed from the national duct and cable network. The standard requirement is two physically diverse terrestrial routes from the exchange to the meet-me rooms, and the standard failure mode is those two routes quietly sharing a duct, a bridge, a pole route or a manhole somewhere along the way.',
         focus: ['site.fibre'],
         look: ['site.fibre'],
         mode: 'data',
-        camera: { pos: [-560, 160, 420], target: [-292, 6, 232] },
-        evidence: 'PUBLIC FACT: cable, landfall, bulkhead, manhole, trench to an exchange, two diverse routes onward.',
+        camera: { pos: [-392, 96, 344], target: [-250, 4, 240] },
+        evidence: 'DERIVED: this is an overland campus and the route shown is a simplification. No cable landing is documented for Clonee.',
       },
       {
-        title: 'Landing station',
-        body: 'The onshore station on the campus site terminates the wet plant and hosts the dry plant — transponders and line systems — with its own power, cooling and security. It is sized to serve up to three cables, so losing one cable is survivable.',
-        focus: ['site.landing'],
-        look: ['site.landing'],
+        title: 'Meet-me rooms',
+        body: `Two meet-me rooms per building is the published arrangement, and that is where carriers hand over to the campus. Each is separately entered, separately powered and separately cooled, so that losing one costs a carrier rather than a building. The model shows a campus-level pair rather than ${INPUTS.meetMeRoomsPerBuilding} per building, because the point being made here is architectural rather than a count.`,
+        focus: ['site.fibrehub'],
+        look: ['site.fibrehub'],
         mode: 'data',
-        camera: { pos: [-430, 90, 300], target: [-292, 6, 232] },
-        evidence: 'PUBLIC FACT: located on site, capable of serving up to three submarine cables.',
+        camera: { pos: [-58, 62, 138], target: [-150, 6, 60] },
+        evidence: 'PUBLIC FACT: SNWA-FB — two meet-me rooms per building for data connectivity.',
       },
       {
-        title: 'Campus core, then the fabric',
-        body: 'The core aggregates carriers and the campus fabric. Then a Clos-style hierarchy: spines in the core, leaves at the rack, every leaf seeing every spine. Redundancy is in the topology, and the cabling is built to match it.',
-        focus: ['site.core', 'M1-W.switch'],
+        title: 'The campus core',
+        body:
+          'Inside the fence the meet-me rooms hand to the campus network core, which aggregates carriers and presents a single interface to the fabric. This is the point where the outside world stops being a set of separate circuits and becomes one dependency, which is why the core needs redundant power, redundant cooling and two ways out of the building. It is the most consequential room on the site and it is about the size of a small house.',
+        focus: ['site.core', 'site.fibrehub'],
         look: ['site.core'],
         mode: 'data',
-        camera: { pos: [-260, 90, 300], target: [-200, 4, 250] },
-        evidence: 'TYPICAL fabric. NOT PUBLIC: device counts, port counts, or optical design.',
+        camera: { pos: [-128, 58, 152], target: [-196, 5, 60] },
+        evidence: 'TYPICAL: the meet-me to core architecture as modelled. NOT PUBLIC: device counts, carrier list or optical design.',
       },
       {
-        title: 'Inside the row',
-        body: 'Top-of-rack switches connect to servers over short optical links. A modern AI fabric is bandwidth-bound: the internal network can move more data per second than the accelerators can consume, which is why optics dominate both cost and failures.',
-        focus: ['M1-W.switch', 'M1-W.rack', 'M1-W.gpu', 'M1-W.storage'],
-        look: ['M1-W.rack'],
+        title: 'Into the hall',
+        body:
+          'The core feeds the hall fabric. In this model a switch sits at each end of every row, so a fabric failure is a row rather than a hall. A real hyperscale fabric is built as a spine-and-leaf hierarchy in which every leaf can reach every spine, so that losing one device costs one path rather than a rack\u2019s connectivity entirely. The hierarchy is the redundancy; the cabling is simply built to match it.',
+        focus: ['site.core', 'CLN1.h1.switch'],
+        look: ['CLN1.h1.switch'],
         mode: 'data',
-        camera: { pos: [-280, 40, -50], target: [-306, 5, -8] },
-        view: { roofOff: true, cutaway: true, follow: 'fibre' },
-        evidence: 'TYPICAL. The distinction between compute, storage and networking as separate domains is industry practice.',
+        camera: { pos: [-356, 28, -76], target: [-420, 4, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN1 },
+        evidence: 'TYPICAL: the fabric hierarchy and the row-level device placement shown.',
+      },
+      {
+        title: 'Top of rack',
+        body:
+          'Over the last few metres the network becomes short optical links to each server, and the traffic settles into two very different patterns: one large read of training data at the start of a job followed by dense sequential checkpoint writes, against a fabric that has to keep up with every accelerator in the row continuously. Fibre pair counts, optics and port counts are not published for Clonee, and none of this fabric detail is a project fact.',
+        focus: ['CLN1.h1.switch', 'CLN1.h1.rack', 'CLN1.h1.storage'],
+        look: ['CLN1.h1.rack'],
+        mode: 'data',
+        camera: { pos: [-364, 20, -104], target: [-420, 3, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN1 },
+        evidence: 'TYPICAL: traffic patterns and top-of-rack architecture. NOT PUBLIC: anything quantitative about the network at Clonee.',
       },
     ],
   },
+
+  /* ---------------------------------------------------------- 6 generators */
   {
-    id: 'critical',
-    title: 'What are the critical path systems?',
-    blurb: 'The delivery view: what has to happen before a transformer can be energised.',
+    id: 'generators',
+    title: 'Ninety diesel generators',
+    blurb:
+      'The one hard published number about generation at Clonee, the arithmetic built on top of it, and the licence that says when they may run.',
     classificationHint:
-      'WBS codes, cost bands and durations are SYNTHETIC. Predecessor logic is TYPICAL project-controls practice for this kind of facility.',
+      'PUBLIC FACT for the count of ninety and the four permitted operating conditions; DERIVED for eighteen per building; TYPICAL for the 2.5 MW rating, the fuel figures and the heat rejection.',
     steps: [
       {
-        title: 'Turn on the delivery layer',
-        body: 'Every component now carries a WBS code, package, discipline, predecessor logic and an indicative cost band. All synthetic, all generic — no real project values are used.',
-        focus: ['gxp.xfmr'],
-        look: ['gxp.xfmr'],
-        mode: 'overview',
-        camera: { pos: [520, 200, -280], target: [300, 12, -140] },
+        title: 'Ninety sets, and one hard number',
+        body: `The industrial emissions licence names ninety diesel generators across the five data-storage buildings. That is the single hard published fact about generation at Clonee: a count, and nothing else about the machines. Eighteen per building is arithmetic rather than a published split, and the model arranges them as two rows of nine behind each bar — behind, because a generator compound is a fire and noise zone, and the halls are the valuable part of the site.`,
+        focus: ['CLN1.gen', 'CLN2.gen', 'CLN3.gen', 'CLN5.gen', 'CLN6.gen'],
+        look: ['CLN1.gen'],
+        mode: 'power',
+        camera: { pos: [-320, 96, -486], target: [-320, 6, -318] },
+        evidence: 'PUBLIC FACT: EPA-P1192 — 90 diesel generators across the campus. DERIVED: eighteen per building.',
       },
       {
-        title: 'The long leads come first',
-        body: 'Transformers, switchgear, UPS and major cooling units are ordered long before they are needed, because their manufacturing and shipping times exceed the site works they depend on. Procurement leads the programme; construction follows it.',
-        focus: ['gxp.xfmr', 'M1-W.upsA', 'M1.cool'],
-        look: ['M1.cool'],
-        mode: 'construction',
-        camera: { pos: [120, 300, -300], target: [0, 8, -60] },
+        title: 'The rating, and why it is an assumption',
+        body: `Nothing published gives a rating. At ${fmt(A('generatorRatedKw') / 1000, 1)} MW per set — a typical hyperscale rating, and the one that makes the arithmetic come out sensibly — each building has ${fmt(derived.generationPerBuildingMW, 0)} MW of standby against ${fmt(derived.buildingItMw, 0)} MW of consented IT load. Campus-wide that is ${fmt(derived.generatorRatedMW, 0)} MW against ${fmt(derived.itCapacityMW, 0)} MW of IT, a ratio of ${fmt(derived.generationVsIt, 2)}. Everything downstream in this journey rests on that one invented number.`,
+        focus: ['CLN1.gen', 'CLN1.gensw', 'CLN1.mv'],
+        look: ['CLN1.gen'],
+        mode: 'power',
+        camera: { pos: [-240, 62, -400], target: [-300, 6, -316] },
+        view: { isolateHall: CLN1 },
+        evidence: 'TYPICAL: the 2.5 MW rating. DERIVED: 45 MW per building, 225 MW campus, from the published count.',
       },
       {
-        title: 'A transformer cannot be energised until a chain completes',
-        body: 'Platform and drainage, then fence and access, then set down and jointing, then relay settings verified, then substation control energised, then the HV bays proved. Miss any link and the transformer sits as a very expensive box.',
-        focus: ['gxp.platform', 'gxp.xfmr', 'gxp.bay', 'gxp.ctrl'],
-        look: ['gxp.xfmr'],
-        mode: 'construction',
-        camera: { pos: [500, 160, -300], target: [300, 12, -140] },
+        title: 'N+1, and what it does not cover',
+        body: `Ninety sets at eighteen per building is not 2N. It is N+1 in spirit: enough capacity to carry the facility with a set or a block missing, and a maintenance strategy that works in blocks rather than one machine at a time. Note carefully what the ratio does not cover. At ${fmt(derived.generationVsFacility, 2)} the fleet is smaller than the ${fmt(derived.facilityLoadMW, 0)} MW whole-facility draw, so auxiliary load has to be shed or accepted before any IT load is touched.`,
+        focus: ['CLN1.gen', 'CLN1.fuel'],
+        look: ['CLN1.gen'],
+        mode: 'power',
+        view: { isolateHall: CLN1 },
+        evidence: 'DERIVED: the ratios. TYPICAL: the N+1 interpretation and the block maintenance model.',
       },
       {
-        title: 'And the IT depends on all of it',
-        body: 'A rack cannot be commissioned until the UPS feeding it has passed functional testing, which needs the substation energised, which needs the grid connection, which needs the tower work. One dependency chain from the sea bed and the transmission corridor to a server.',
-        focus: ['M1-W.rack', 'M1-W.upsA', 'M1.mv', 'gxp.xfmr', 'hv.line'],
-        look: ['M1-W.rack'],
+        title: 'The four permitted conditions',
+        body:
+          'The licence is explicit about when these engines may run: loss of grid supply; instability or reduction of grid supply; maintenance; and grid-reduction conditions requested by the transmission system operator. Read that list as a permission with a boundary around it. Running ninety engines to sell surplus into a full network is not permitted, which tells you the plant is built for a handful of long events a year rather than as a peaking asset.',
+        focus: ['CLN1.gen', 'CLN1.fuel', 'CLN1.gensw'],
+        look: ['CLN1.gensw'],
+        mode: 'power',
+        camera: { pos: [-150, 54, -372], target: [-220, 6, -302] },
+        view: { isolateHall: CLN1 },
+        evidence: 'PUBLIC FACT: EPA-P1192 — the four conditions under which the generators may operate.',
+      },
+      {
+        title: 'Fuel, and where the real limit is',
+        body: `No tank sizes are published. A typical belly tank of ${fmtInt(A('generatorBellyTankL'))} litres per set gives about ${fmtInt(derived.bellyTankTotalM3)} m³ across the fleet, which at ${fmtInt(derived.dieselLPerHourFleet)} litres an hour for the whole fleet running is ${fmt(derived.bellyTankRunHours, 1)} hours before a road tanker has to reach the gate. Beyond that the constraint is tanker logistics, bunding and segregation, not the engines.`,
+        focus: ['CLN1.fuel', 'CLN1.gen'],
+        look: ['CLN1.fuel'],
+        mode: 'power',
+        view: { isolateHall: CLN1 },
+        evidence: 'TYPICAL: 11,000 L belly tanks, volumetric fuel consumption, bundled and drained with automatic shutoff. No tank size is published for Clonee.',
+      },
+      {
+        title: 'Engine heat is a separate problem',
+        body: `A diesel engine rejects more heat than it converts. At the roughly 43% electrical efficiency assumed in the model, a ${fmt(A('generatorRatedKw') / 1000, 1)} MW set dumps about ${fmt(A('generatorHeatReleaseKw') / 1000, 2)} MW through its own radiators, jacket water and exhaust. Across ninety sets that is ${fmt(derived.generationHeatMW, 1)} MW, more than the IT load itself, and none of it touches the hall cooling loop. Two independent heat rejection problems; conflating them is the commonest error in this discussion.`,
+        focus: ['CLN1.genheat', 'CLN1.gen', 'site.ambient'],
+        look: ['CLN1.genheat'],
+        mode: 'cooling',
+        camera: { pos: [-320, 64, -420], target: [-320, 8, -310] },
+        view: { isolateHall: CLN1 },
+        evidence: 'TYPICAL: 2,950 kW of heat per set and the separate rejection path through each set\u2019s own cooling systems.',
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- 7 build */
+  {
+    id: 'build',
+    title: 'Building a data centre beside a running one',
+    blurb:
+      'From the 2015 consent to five buildings, and why the last two were the hard part: every tie-in was made against live plant.',
+    classificationHint:
+      'PUBLIC FACT for both consents, the substation consent, the energisation date, the handover dates and the announced expansion; DERIVED and TYPICAL for the months between the dated anchors.',
+    steps: [
+      {
+        title: 'Consent, 2015',
+        body: `Meath County Council granted application RA150605 in 2015 for a phased data-centre development on about ${fmt(INPUTS.siteAreaHa, 1)} hectares: two buildings of approximately ${fmtInt(INPUTS.gfaM2PerOriginalBuilding)} m² each, four data halls per building, ${INPUTS.itMwPerBuilding} MW of data capacity per building, plus generators, cooling infrastructure, tanks and drainage, internal roads, security infrastructure and underground ${INPUTS.campusMvKv} kV cables. Every building in this model descends from that document.`,
+        focus: ['site.road', 'site.fence', 'CLN1.shell', 'CLN2.shell'],
+        look: ['site.road'],
         mode: 'construction',
-        camera: { pos: [-250, 90, -30], target: [-300, 6, -10] },
-        view: { roofOff: true, cutaway: true },
+        camera: { pos: [430, 430, 640], target: [-40, 8, -20] },
+        evidence: 'PUBLIC FACT: MCC-150605 — consented area, floor areas, hall count, capacity per building and the underground 20 kV cables.',
+      },
+      {
+        title: 'The substation is its own programme',
+        body:
+          'The 220 kV station was permitted separately, under An Bord Pleanála VA0018, and ran on its own critical path beside the buildings. Mobilisation, erosion and sediment control, bulk earthworks, platform formation and the two transmission towers all happened while the first building\u2019s frame was going up. Tower delivery is gated by the transmission system owner and the transformers go through factory acceptance testing before they ship, so procurement set the pace and the site followed it.',
+        focus: ['sub.platform', 'sub.tower1', 'sub.tower2', 'tmp.road'],
+        look: ['sub.platform'],
+        mode: 'construction',
+        camera: { pos: [556, 118, 214], target: [330, 2, -20] },
+        evidence: 'PUBLIC FACT: BP-VA0018 — substation compound scope. TYPICAL: the ordering of earthworks, tower delivery and factory acceptance testing.',
+      },
+      {
+        title: 'August 2017, then the first building',
+        body: `The station was energised in August ${INPUTS.gridConnectionYear}. CLN1 was completed in the final quarter of the same year, with four halls of about ${fmtInt(INPUTS.hallFloorM2 * INPUTS.hallsPerBuilding)} m² fitted out and commissioned, the administration building and staff welfare, the delivery systems, all internal and external roads, the car parking and the ${INPUTS.transmissionKv} kV substation. Phase 1 site start to opening ran about ${INPUTS.phase1BuildMonths} months. Production traffic could be served from that point.`,
+        focus: ['sub.xfmr', 'sub.bay', 'CLN1.shell', 'CLN1.h1.rack'],
+        look: ['sub.bay'],
+        mode: 'construction',
+        camera: { pos: [-90, 96, -60], target: [-320, 8, -190] },
+        evidence: 'PUBLIC FACT: EIR-AR2017 and SNWA-FB — energisation in August 2017 and phase 1 completion in Q4 2017. DERIVED: the phase 1 duration from PRESS-ECO.',
+      },
+      {
+        title: 'Overlapping, not sequential',
+        body:
+          'The second building\u2019s shell was left fallow at the end of phase 1 and fitted out afterwards, handed over in May 2018 — and the record notes that this fit-out proceeded faster than anticipated while the third phase was already starting on site. That is the first hard evidence of how the campus was really delivered: overlapping phases sharing one substation, one site team and one set of interfaces, not a sequence of standalone buildings.',
+        focus: ['CLN2.shell', 'CLN1.h1.rack', 'CLN1.h1.crah'],
+        look: ['CLN2.shell'],
+        mode: 'construction',
+        camera: { pos: [126, 104, -40], target: [-30, 8, -190] },
+        view: { isolateHall: CLN2 },
+        evidence: 'PUBLIC FACT: SNWA-FB — phase 2 fit-out began in Q4 2017 for handover in May 2018.',
+      },
+      {
+        title: 'The expansion lands',
+        body: `CLN3 reached RIBA stage 7 in 2019. Consent RA180671 then covered two further data-storage buildings of approximately ${fmtInt(INPUTS.gfaM2Expansion)} m² combined, plus another administration and office building, additional generators, roads, drainage, parking and security. Construction of both was announced in March 2019, taking the facility to nearly ${fmtInt(INPUTS.gfaM2TotalNearly)} m², and the earlier buildings took LEED Gold that December.`,
+        focus: ['CLN3.shell', 'CLN5.shell', 'CLN6.shell', 'site.admin2'],
+        look: ['CLN5.shell'],
+        mode: 'construction',
+        camera: { pos: [388, 148, 176], target: [80, 8, 20] },
+        evidence: 'PUBLIC FACT: MCC-180671 and META-2019 — the expansion consent, the March 2019 announcement and LEED Gold.',
+      },
+      {
+        title: 'Building beside a live campus',
+        body:
+          'This is the delivery problem that defines the last third of the programme. Two new buildings, one live substation, five live generator compounds, live tenants and an IT load that cannot be interrupted for a moment. Every tie-in has to be made against energised plant, construction traffic has to cross operational routes, and a fault caused by the contractor is indistinguishable from a fault caused by age. Interface management is the discipline this phase actually needs.',
+        focus: ['CLN5.shell', 'CLN6.shell', 'CLN5.mv', 'CLN1.gen', 'sub.xfmr'],
+        look: ['CLN5.shell'],
+        mode: 'construction',
+        camera: { pos: [392, 132, 214], target: [140, 8, -20] },
+        evidence: 'TYPICAL: the interface problem of building against an operating campus. The two expansion phases themselves are DERIVED from the consent and announcement dates.',
+      },
+    ],
+  },
+
+  /* ------------------------------------------------------------------- 8 ai */
+  {
+    id: 'ai',
+    title: 'Converting a 2017 hall to AI',
+    blurb:
+      'The most valuable lesson in the model: this retrofit is constrained by electricity, not by floor area — and three other things as well.',
+    classificationHint:
+      'DERIVED for every figure quoted, from the published IT area and power density plus the published AI rack power; TYPICAL for the retrofit architecture and the floor-loading comparison, which are industry practice and not Clonee facts.',
+    steps: [
+      {
+        title: 'The hall as delivered',
+        body: `${HALL_NAME[RETROFIT_HALL]} is about ${fmtInt(INPUTS.hallFloorM2)} m² of white space at ${fmt(derived.hallPowerDensityFromConsentKwM2, 2)} kW/m², indirectly air cooled, with busway and rack tap-offs sized for the racks it was designed around: ${fmt(INPUTS.deliveredRackKw, 1)} kW each. A modern rack-scale AI system is ${fmt(derived.densityJump, 1)} times that density. The obvious question — can this floor hold the machines — has an answer, and it is yes.`,
+        focus: [`${RETROFIT_HALL}.rack`, `${RETROFIT_HALL}.crah`, `${RETROFIT_HALL}.bus`, `${RETROFIT_HALL}.pdu`],
+        look: [`${RETROFIT_HALL}.rack`],
+        mode: 'cooling',
+        camera: { pos: [96, 30, -62], target: [4, 4, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN2 },
+      },
+      {
+        title: 'First constraint: electricity, not floor',
+        body: `The existing IT area of ${fmtInt(INPUTS.itAreaM2)} m² could physically hold about ${fmtInt(derived.rackPositionsInItArea)} rack positions at ${INPUTS.rackSpaceM2} m² each. The campus has ${fmt(derived.itCapacityMW, 0)} MW of consented supply. At ${INPUTS.aiRackKw} kW per AI rack that funds about ${fmtInt(derived.racksAffordableAtAiDensity)} racks — ${fmt(derived.geometricUtilisationPct, 1)}% of the geometric positions. On the second published route, ${fmt(derived.itCapacityFromDensityMW, 0)} MW, it is about ${fmtInt((derived.itCapacityFromDensityMW * 1000) / INPUTS.aiRackKw)} racks. Either way the floor is not the constraint; the supply is.`,
+        focus: ['CLN2.lv', 'CLN2.sub', 'CLN2.mv', 'sub.xfmr', `${RETROFIT_HALL}.rack`],
+        look: ['CLN2.lv'],
+        mode: 'power',
+        camera: { pos: [158, 96, -92], target: [4, 6, -206] },
+        view: { isolateHall: CLN2 },
+        evidence:
+          'DERIVED: 30,000 geometric positions against the 180 MW and 168 MW published supply routes at the published 132 kW AI rack power (IND-NVDA). No Clonee AI deployment is claimed.',
+      },
+      {
+        title: 'Second constraint: the cooling architecture',
+        body: `An indirectly air-cooled hall cannot natively accept liquid cooling. Its coils are air to water, its in-hall units move air, and there is no coolant circuit to tap. The realistic paths are both expensive: liquid-to-air sidecar units that reject the coolant straight to ambient inside the white space, or a wholesale conversion of the hall to a liquid primary loop. Industry guidance is explicit that this is the discriminator between an air-cooled hall and a liquid-ready one, and it is structural rather than operational.`,
+        focus: [`${RETROFIT_HALL}.cold`, `${RETROFIT_HALL}.cdu`, `${RETROFIT_HALL}.crah`, 'CLN2.cool'],
+        look: [`${RETROFIT_HALL}.cdu`],
+        mode: 'cooling',
+        camera: { pos: [104, 26, -74], target: [4, 4, -162] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN2 },
+        evidence: 'TYPICAL: IND-LC — sidecar units or wholesale conversion; a hall whose primary cooling is air cannot natively take liquid.',
+      },
+      {
+        title: 'Third constraint: busway and tap-offs',
+        body: `The distribution in this hall carries about ${fmt(derived.deliveredRackAmps, 1)} A per rack. A ${INPUTS.aiRackKw} kW AI rack on ${INPUTS.buswayVolts} V three-phase draws ${fmt(derived.aiRackAmps, 0)} A, and at the design point the infrastructure is actually provisioned for it draws ${fmt(derived.aiRackAmpsEdbp, 0)} A. These are not connections you can re-terminate; they are a different distribution system, and forcing a full rack onto an undersized tap is a thermal trip waiting to happen.`,
+        focus: [`${RETROFIT_HALL}.bus`, `${RETROFIT_HALL}.pdu`, 'CLN2.lv', `${RETROFIT_HALL}.rack`],
+        look: [`${RETROFIT_HALL}.pdu`],
+        mode: 'power',
+        camera: { pos: [96, 22, -104], target: [4, 3, -160] },
+        view: { roofOff: true, cutaway: true, isolateHall: CLN2 },
+        evidence:
+          'DERIVED: amperages from the published 415 V busway voltage and the published rack powers. DERIVED: 12.5 kW delivered rack power from the two published density routes.',
+      },
+      {
+        title: 'Fourth constraint: the floor',
+        body:
+          'A rack-scale system with liquid cooling and overhead busway weighs far more than the rack it replaced. A loaded rack-scale installation of this kind is around 2,100 kg/m², against roughly 1,500 kg/m² for a conventional air-cooled design — typical industry figures, not project data. A slab designed and poured years before the AI hardware existed was not designed for that, and strengthening a slab is not a change order. It is a project.',
+        focus: [`${RETROFIT_HALL}.rack`, `${RETROFIT_HALL}.floor`, `${RETROFIT_HALL}.cdu`],
+        look: [`${RETROFIT_HALL}.floor`],
+        mode: 'construction',
+        camera: { pos: [112, 34, -66], target: [4, 2, -160] },
+        view: { cutaway: true, isolateHall: CLN2 },
+        evidence: 'TYPICAL: floor loading figures for rack-scale and conventional installations. Not published for Clonee and not derivable from the model inputs.',
+      },
+      {
+        title: 'What the model converts',
+        body: `The modelled conversion is deliberately modest. Cold plates at every rack, coolant distribution units down the rows, a coolant loop back to the plant corridor, and about ${fmt(INPUTS.aiLiquidShare * 100, 0)}% of rack heat taken by liquid with the remainder still as air — because power supplies, memory and switches keep dumping heat and in-hall air handling cannot simply be removed. It shows a credible retrofit, not a filled hall, and it is a teaching model rather than a Clonee project.`,
+        focus: [`${RETROFIT_HALL}.cold`, `${RETROFIT_HALL}.cdu`, `${RETROFIT_HALL}.server`, 'CLN2.hx'],
+        look: [`${RETROFIT_HALL}.cold`],
+        mode: 'cooling',
+        camera: { pos: [100, 24, -86], target: [4, 4, -162] },
+        view: { roofOff: true, cutaway: true, flows: true, isolateHall: CLN2 },
+        evidence: 'TYPICAL: the retrofit architecture modelled. SYNTHETIC: that a specific hall has been converted. No such project at Clonee is claimed.',
+      },
+      {
+        title: 'The real answer is at the substation',
+        body: `The honest conclusion is that filling this hall with AI is not a hall project. To buy the racks the arithmetic demands you have to buy the megawatt, and a megawatt at Clonee means another connection, another consent and another critical path — the same shape of problem as the ${INPUTS.gridConnectionMonths}-month connection the company already built once in ${INPUTS.gridConnectionYear}. Which is why the AI story ends exactly where the grid story began, and why the substation is the most valuable object in this model.`,
+        focus: ['sub.xfmr', 'sub.bay', 'sub.platform', `${RETROFIT_HALL}.rack`],
+        look: ['sub.platform'],
+        mode: 'power',
+        camera: { pos: [486, 128, 214], target: [330, 8, 0] },
+        evidence: 'DERIVED: the capacity arithmetic above. PUBLIC FACT: EIR-AR2017 — the first customer-built 220 kV station in Ireland, in approximately 15 months.',
       },
     ],
   },
 ];
+
+/**
+ * The chains these journeys follow, re-exported so a caller can tell the
+ * learner which chain a step belongs to without re-deriving it.
+ */
+export const JOURNEY_CHAINS: Record<string, string[]> = {
+  power: POWER_CHAIN,
+  heat: HEAT_CHAIN,
+  water: WATER_CHAIN,
+  fibre: FIBRE_CHAIN,
+};
+
+/** The hall used by the retrofit journey, exposed for inspection deep links. */
+export const JOURNEY_RETROFIT_HALL = RETROFIT_HALL;

@@ -18,36 +18,39 @@ const LIFT: Record<string, number> = {
   fire: 9,
 };
 
-/** Component ids that belong to one representative electrical train (hall 1, module 1). */
-const POWER_TRAIN = new Set([
-  'hv.line',
-  'gxp.bay',
-  'gxp.xfmr',
-  'gxp.ctrl',
-  'M1.mv',
-  'M1-W.gen',
-  'M1-W.sub',
-  'M1-W.upsA',
-  'M1-W.upsB',
-  'M1-W.batt',
-  'M1-W.lv',
-  'M1-W.bus',
-  'M1-W.pdu',
-  'M1-W.rack',
-  'M1-W.gpu',
-]);
+/**
+ * Representative trains, for the isolate-train controls.
+ *
+ * Built from the campus model rather than hand-listed, so they cannot drift out
+ * of step when the geometry changes. The power train is one building's supply
+ * chain from the transmission loop-in to the racks; the cooling train is one
+ * building's heat path from the racks out to ambient.
+ */
+function buildTrain(b: string, kinds: string[]): Set<string> {
+  const out = new Set<string>();
+  if (kinds.includes('power')) {
+    out.add('hv.line');
+    out.add('sub.platform');
+    out.add('sub.bay');
+    out.add('sub.transformer');
+    out.add('sub.control');
+    out.add('sub.mv-building');
+  }
+  for (const id of COMPONENTS) {
+    const { type, id: cid, hall } = id;
+    if (cid === `sub.transformer` || cid === 'sub.bay') continue;
+    if (!cid.startsWith(b)) continue;
+    const powerish = ['mv-switchgear', 'generator', 'generator-switchgear', 'fuel-tank', 'unit-substation', 'ups', 'battery', 'lv-switchboard', 'busway', 'pdu', 'rack', 'server'];
+    const coolish = ['crah', 'cold-plate', 'cdu', 'heat-exchanger', 'air-cooler', 'pump', 'reservoir', 'water-treatment'];
+    if (kinds.includes('power') && powerish.includes(type)) out.add(cid);
+    if (kinds.includes('cooling') && coolish.includes(type)) out.add(cid);
+    void hall;
+  }
+  return out;
+}
 
-const COOLING_TRAIN = new Set([
-  'M1-W.gpu',
-  'M1-W.cold',
-  'M1-W.cdu',
-  'M1-W.crah',
-  'M1.hx',
-  'M1.cool',
-  'M1.pump',
-  'M1-W.res',
-  'site.wtp',
-]);
+const POWER_TRAIN = buildTrain('CLN1.', ['power']);
+const COOLING_TRAIN = buildTrain('CLN1.', ['cooling']);
 
 /**
  * Label budget. Too many labels is worse than none, so only the highest value
@@ -55,16 +58,16 @@ const COOLING_TRAIN = new Set([
  */
 const LABEL_PRIORITY: Record<string, number> = {
   'data-hall': 10,
-  generator: 9,
-  'gxp-transformer': 8,
-  'gxp-platform': 8,
-  'adiabatic-cooler': 7,
+  'sub-transformer': 9,
+  'sub-platform': 8,
+  generator: 8,
+  'air-cooler': 7,
   'hv-line': 7,
   'stormwater-basin': 6,
-  wetland: 6,
+  watercourse: 6,
   bore: 6,
   'water-treatment': 6,
-  'landing-station': 6,
+  'fibre-hub': 6,
   'fibre-route': 6,
   'network-core': 5,
   admin: 5,
@@ -73,8 +76,10 @@ const LABEL_PRIORITY: Record<string, number> = {
   road: 4,
   ups: 4,
   rack: 4,
-  'module-plant': 3,
-  'gxp-bay': 3,
+  'building-plant': 3,
+  'sub-bay': 3,
+  'heat-plume': 3,
+  cdu: 3,
 };
 
 function labelSetFor(mode: Mode, limit: number): Set<string> {
@@ -83,6 +88,8 @@ function labelSetFor(mode: Mode, limit: number): Set<string> {
     (c) =>
       c.label3d &&
       (LABEL_PRIORITY[c.type] ?? 1) >= 4 &&
+      /* The retrofit components only earn a label while the retrofit is on. */
+      (!c.retrofit || mode === 'ai') &&
       (!system || c.system === system || c.system === 'site'),
   );
   pool.sort((a, b) => (LABEL_PRIORITY[b.type] ?? 1) - (LABEL_PRIORITY[a.type] ?? 1));
@@ -105,16 +112,26 @@ function Node({ c, showLabel }: { c: CampusComponent; showLabel: boolean }) {
   const roofOff = useStore((s) => s.roofOff);
   const cutaway = useStore((s) => s.cutaway);
   const explode = useStore((s) => s.explode);
-  const isolateHall = useStore((s) => s.isolateHall);
+  const isolateBuilding = useStore((s) => s.isolateBuilding);
   const isolateTrain = useStore((s) => s.isolateTrain);
   const selected = useStore((s) => s.selected);
   const journey = useStore((s) => s.journey);
   const cxState = useStore((s) => s.cx);
+  const aiRetrofit = useStore((s) => s.aiRetrofit);
   const select = useStore((s) => s.select);
   const hover = useStore((s) => s.hover);
 
   const build = useMemo(() => buildStateOf(c, constructPhase), [c, constructPhase]);
-  if (build.state === 'hidden') return null;
+
+  /**
+   * The retrofit kit exists in the model at all times, because it is part of
+   * the Clonee campus of the future. It is only *present* when the AI mode is
+   * on, so the default view never shows cold plates that a real hall does not
+   * have. The delivered hall's air-cooled equipment stays visible underneath,
+   * which is the comparison the mode is for.
+   */
+  const absent = (c.retrofit && !aiRetrofit) || build.state === 'hidden';
+  if (absent) return null;
 
   const failed = faults.includes(c.type);
   let dim = 1;
@@ -125,11 +142,14 @@ function Node({ c, showLabel }: { c: CampusComponent; showLabel: boolean }) {
   if (isolateTrain === 'power') dim = POWER_TRAIN.has(c.id) ? 1 : 0.1;
   if (isolateTrain === 'cooling') dim = COOLING_TRAIN.has(c.id) ? 1 : 0.1;
 
-  if (isolateHall !== null && c.hall !== undefined) dim = Math.min(dim, c.hall === isolateHall ? 1 : 0.08);
-  if (isolateHall !== null && c.hall === undefined && c.module !== undefined) dim = Math.min(dim, c.module === Math.ceil(isolateHall / 2) ? 0.6 : 0.15);
+  /* Isolation is by building, because a building is the unit the campus is
+     actually delivered and operated in. A hall is the unit inside it. */
+  if (isolateBuilding !== null) {
+    const sameBuilding = c.building === isolateBuilding;
+    dim = Math.min(dim, sameBuilding ? 1 : 0.08);
+  }
 
   if (journey) {
-    // dim everything not in the step focus set
     const step = journeyFocus(journey.id, journey.step);
     if (step && !step.includes(c.id)) dim = Math.min(dim, 0.12);
   }
@@ -219,7 +239,7 @@ function journeyFocus(journeyId: string, stepIndex: number): string[] | null {
 
 export function Campus() {
   const mode = useStore((s) => s.mode);
-  const labelSet = useMemo(() => labelSetFor(mode, 20), [mode]);
+  const labelSet = useMemo(() => labelSetFor(mode, 22), [mode]);
   return (
     <group>
       {COMPONENTS.map((c) => (

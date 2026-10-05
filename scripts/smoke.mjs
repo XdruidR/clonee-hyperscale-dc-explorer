@@ -11,9 +11,21 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const CHROME = process.env.CHROME_BIN || '/usr/bin/google-chrome';
+/**
+ * Chrome location. Resolved per platform because this suite is developed on
+ * Windows and run on Linux CI, and the executable paths differ.
+ */
+const CHROME =
+  process.env.CHROME_BIN ||
+  (process.platform === 'win32'
+    ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    : process.platform === 'darwin'
+      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      : '/usr/bin/google-chrome');
 const OUT = 'smoke-out';
 const PORT = 4173;
 
@@ -63,7 +75,16 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
 
 /* ------------------------------------------------------------- chrome driver */
-const userDir = '/tmp/dcx-smoke-profile';
+/**
+ * Chrome profile directory and debugging port.
+ *
+ * Both are platform-resolved because this suite runs on Windows during
+ * development and on Linux in CI. The hard-coded POSIX profile path fails the
+ * spawn outright on Windows, and a fixed debugging port collides when a preview
+ * server is already running.
+ */
+const userDir = join(tmpdir(), 'dcx-smoke-profile');
+const DEBUG_PORT = Number(process.env.SMOKE_DEBUG_PORT || (process.platform === 'win32' ? 9223 : 9222));
 rmSync(userDir, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
@@ -71,7 +92,7 @@ const chrome = spawn(CHROME, [
   '--headless=new',
   '--no-sandbox',
   '--disable-dev-shm-usage',
-  '--remote-debugging-port=9222',
+  `--remote-debugging-port=${DEBUG_PORT}`,
   `--user-data-dir=${userDir}`,
   '--window-size=1600,1000',
   '--use-angle=swiftshader',
@@ -85,7 +106,7 @@ chrome.stderr.on('data', () => {});
 async function waitForDevtools() {
   for (let i = 0; i < 60; i++) {
     try {
-      const r = await fetch('http://127.0.0.1:9222/json/version');
+      const r = await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`);
       if (r.ok) return (await r.json()).webSocketDebuggerUrl;
     } catch {}
     await sleep(250);
@@ -226,7 +247,17 @@ await step('component count in the DOM-adjacent model', async () => {
   console.log(`(${n} labels) `);
 });
 
-for (const mode of ['POWER', 'COOLING', 'WATER', 'DATA', 'RESILIENCE', 'CONSTRUCTION', 'COMMISSIONING']) {
+for (const mode of [
+  'POWER',
+  'COOLING',
+  'WATER',
+  'DATA',
+  'RESILIENCE',
+  'CONSTRUCTION',
+  'COMMISSIONING',
+  'PROJECT CONTROLS',
+  'AI EVOLUTION',
+]) {
   await step(`mode: ${mode}`, async () => {
     await evaluate(`(() => {
       const b = [...document.querySelectorAll('.tabs button')].find(x => x.textContent.trim() === ${JSON.stringify(mode)});
@@ -334,7 +365,8 @@ await step('resilience: inject a failure', async () => {
   })()`);
   await sleep(700);
   const txt = await evaluate(`document.querySelector('.panel.left').innerText`);
-  if (!/Remaining pumps take the flow/.test(txt)) throw new Error('failure outcome not explained in the panel');
+  if (!/surviving pumps recover the flow/i.test(txt))
+    throw new Error('failure outcome not explained in the panel');
   await shot('resilience-pump-failed');
 });
 
@@ -345,7 +377,7 @@ await step('power: run the utility failure animation', async () => {
   })()`);
   await sleep(400);
   await evaluate(`(() => {
-    [...document.querySelectorAll('.panel.left button')].find(x => x.textContent.trim() === '▶ Play').click();
+    [...document.querySelectorAll('.panel.left button')].find(x => x.textContent.trim() === 'Play').click();
     return true;
   })()`);
   await sleep(6000);
@@ -363,13 +395,15 @@ await step('commissioning: turnover package gating', async () => {
   await sleep(500);
   const txt = await evaluate(`document.querySelector('.panel.left').innerText`);
   if (!/TURNOVER PACKAGES/i.test(txt)) throw new Error('the commissioning panel is not package based any more');
-  if (!/Grid exit point/i.test(txt)) throw new Error('expected the GXP turnover package to be listed');
-  if (!/Hall 1/.test(txt) || !/cooling distribution/i.test(txt))
-    throw new Error('expected hall-scoped turnover packages to be listed');
+  if (!/220 kV substation/i.test(txt)) throw new Error('expected the substation turnover package to be listed');
+  if (!/CLN1 hall 1/.test(txt) || !/cooling distribution/i.test(txt))
+    throw new Error('expected building-qualified hall-scoped turnover packages to be listed');
 
   /* the hall IT package must be blocked by its upstream packages */
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.panel.left button.row')].find(x => x.textContent.includes('IT fitout'));
+    const rows = [...document.querySelectorAll('.panel.left .phase-list button')];
+    const b = rows.find(x => x.textContent.includes('CLN1 hall 1') && x.textContent.includes('IT fitout'));
+    if (!b) throw new Error('no IT fitout turnover package row found');
     b.click();
     return true;
   })()`);
@@ -388,12 +422,12 @@ await step('commissioning: turnover package gating', async () => {
 
   /* following the correct order on a root package must never gate */
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.panel.left button.row')].find(x => x.textContent.includes('Grid exit point'));
+    const b = [...document.querySelectorAll('.panel.left .phase-list button')].find(x => x.textContent.includes('220 kV substation'));
     b.click();
     return true;
   })()`);
   await sleep(300);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 14; i++) {
     const state = await evaluate(`(() => {
       const b = [...document.querySelectorAll('.panel.left button')].find(x => x.textContent.startsWith('Complete:'));
       return b ? { label: b.textContent, disabled: b.disabled } : { label: null };
@@ -409,13 +443,13 @@ await step('commissioning: turnover package gating', async () => {
     await sleep(300);
   }
   const doneTxt = await evaluate(`document.querySelector('.panel.left').innerText`);
-  if (!/■/.test(doneTxt)) throw new Error('completed package stages are not shown');
+  if (!/complete/i.test(doneTxt)) throw new Error('completed package stages are not shown');
   await shot('commissioning', 30_000);
 });
 
 await step('guided journey moves the camera', async () => {
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.journey-strip button')].find(x => x.textContent.includes('How does electricity reach a GPU'));
+    const b = [...document.querySelectorAll('.journey-strip button')].find(x => x.textContent.includes('Following the electrons'));
     b.click();
     return true;
   })()`);
@@ -445,7 +479,7 @@ await step('inspector: select a component', async () => {
   await sleep(400);
   await sleep(500);
   await evaluate(`(() => {
-    const b = [...document.querySelectorAll('.panel.left button.row')].find(x => x.textContent.includes('GPU'));
+    const b = [...document.querySelectorAll('.panel.left button.row')].find(x => x.textContent.includes('Servers'));
     b.click();
     return true;
   })()`);
@@ -466,7 +500,12 @@ await step('sources and method panel', async () => {
   })()`);
   await sleep(600);
   const t = await evaluate(`document.querySelector('.sources-inner').innerText`);
-  if (!t.includes('PUBLIC FACT')) throw new Error('method panel missing classification rule');
+  if (!/every claim in the model carries one of four labels/i.test(t))
+    throw new Error('method panel missing the classification rule');
+  if (!/where a value has to be assumed/i.test(t))
+    throw new Error('method panel missing the honesty rule');
+  if (!/What is not public/i.test(t))
+    throw new Error('method panel missing the boundary of the public record');
   await shot('sources', 30_000);
   await evaluate(`(() => {
     [...document.querySelectorAll('.tabs2 button')].find(x => x.textContent.includes('Public facts')).click();
@@ -474,7 +513,7 @@ await step('sources and method panel', async () => {
   })()`);
   await sleep(400);
   const facts = await evaluate(`document.querySelector('.sources-inner').innerText`);
-  if (!facts.includes('Emergency generation') || !facts.includes('PUBLIC FACT'))
+  if (!facts.includes('Emergency generation') || !facts.includes('FACT'))
     throw new Error('fact register did not render');
   await shot('facts', 30_000);
   await evaluate(`(() => {

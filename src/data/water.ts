@@ -1,12 +1,26 @@
 /**
- * Water balance for the modelled campus.
+ * Water balance for the Clonee campus, and the contradictory capacity figures
+ * that surround it.
  *
- * Rows are the public figures from the civil servicing report and consents.
- * Derived rows are arithmetic on those figures, clearly marked SIMPLIFIED.
- * Anything not published is marked TYPICAL and worded as an assumption.
+ * Two rules apply to every number in this file:
+ *
+ *   1. It comes from `calculations.ts`, which does all arithmetic once, from
+ *      published inputs and named assumptions. Nothing here re-derives or
+ *      restates a quantity.
+ *   2. Its label says how much it is worth. PUBLIC FACT is in the record.
+ *      DERIVED is arithmetic on record. TYPICAL is practice, not Clonee.
+ *
+ * The Clonee record is thin on water. The emissions licence records that a
+ * residual evaporative cooling-water discharge exists; it publishes no volume.
+ * The architect's project record says the IT cooling is indirect air. So the
+ * balance below is almost entirely DERIVED, and that is not a defect. It is
+ * what an honest water model looks like when the sources give you a heat load,
+ * a climate and a discharge obligation and nothing else.
  */
 
-import { derived, fmt, waterIntensitySentence } from './calculations';
+import { INPUTS, ASSUMPTIONS, derived, fmt, fmtInt, waterIntensitySentence } from './calculations';
+
+const A: Record<string, number> = Object.fromEntries(ASSUMPTIONS.map((a) => [a.key, a.value]));
 
 export interface WaterRow {
   id: string;
@@ -14,196 +28,263 @@ export interface WaterRow {
   value: number;
   unit: string;
   kind: 'in' | 'out' | 'store' | 'demand' | 'derived';
-  classification: 'PUBLIC FACT' | 'TYPICAL' | 'SIMPLIFIED';
+  classification: 'PUBLIC FACT' | 'DERIVED' | 'TYPICAL';
   note: string;
   sources: string[];
 }
 
 export const WATER_BALANCE: WaterRow[] = [
+  /* ------------------------------------------------------------- sources */
   {
-    id: 'rain- roofs',
-    label: 'Rainfall captured from hall roofs',
-    value: 30_000,
-    unit: 'm2 roof area',
+    id: 'rainfall-on-site',
+    label: 'Rain falling on the site',
+    value: Number(derived.rainfallVolumeM3Yr.toFixed(0)),
+    unit: 'm³/yr over 95.5 ha',
     kind: 'in',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: about 30,000 m2 of hall roof is piped into the cooling water reservoirs.',
-    sources: ['ES-CIVILS'],
+    classification: 'DERIVED',
+    note: `DERIVED: ${fmtInt(INPUTS.siteAreaHa * 10_000)} m² of consented land times a long-term average rainfall of ${fmtInt(A.longTermRainfallMmYr)} mm/yr for County Meath. The site area is published; the rainfall figure is a TYPICAL planning assumption, because rainfall is not a project quantity. This volume is not available to the campus — most of it falls on grass, soaks in or runs off before it reaches a pipe.`,
+    sources: ['MCC-150605', 'IND-ACUE'],
   },
   {
-    id: 'rain-hardstand',
-    label: 'Rainfall captured from hardstand and landscape',
-    value: 65_000,
-    unit: 'm2 contributing area',
+    id: 'impervious-area',
+    label: 'Roof and hardstand that can be collected from',
+    value: Number(derived.imperviousAreaM2.toFixed(0)),
+    unit: 'm²',
     kind: 'in',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: about 65,000 m2 is captured via a weir arrangement with pretreatment before it reaches the cooling loop.',
-    sources: ['ES-CIVILS'],
+    classification: 'DERIVED',
+    note: `DERIVED: ${fmt(A.imperviousFraction * 100, 0)}% of the site is treated as roof, plant compound, road and parking. That fraction is arithmetic on published floor areas over the published land area. It matters because it is the denominator for every water number on this campus: a hyperscale site is mostly building and paving, and it is that impervious area, not the landholding, that produces collectable water.`,
+    sources: ['MCC-150605', 'MCC-180671', 'SNWA-FB'],
   },
   {
-    id: 'rain-vol',
-    label: 'Annual capture achieved',
-    value: 75_000,
-    unit: 'm3/yr',
+    id: 'runoff-capture',
+    label: 'Runoff captured from roofs and hardstands',
+    value: Number(derived.runoffCaptureM3Yr.toFixed(0)),
+    unit: 'm³/yr',
     kind: 'in',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: about 13% of the site\'s rainfall volume, modelled over 60 years of record. The balance of rainfall runs off, soaks away or evaporates.',
-    sources: ['ES-CIVILS'],
+    classification: 'DERIVED',
+    note: `DERIVED: impervious area times rainfall times a runoff coefficient of ${fmt(A.runoffCoefficient, 2)} before attenuation, which is TYPICAL for roof and paved surfaces. In practice the majority of this is the cooling circuit's make-up supply, which is why a data centre on a wet island can still treat its own roofs as a water source rather than as a drainage problem.`,
+    sources: ['MCC-150605', 'SNWA-FB'],
   },
   {
-    id: 'bore-take',
-    label: 'Groundwater take (consented maximum)',
-    value: 220_752,
-    unit: 'm3/yr',
-    kind: 'in',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: 7 L/s, 604,800 L/day, 220,752,000 L/yr. Anticipated operational take is about 212,600 m3/yr. Used only when rainfall capture does not refill the reservoirs.',
-    sources: ['ES-PERMIT', 'ES-CIVILS'],
-  },
-  {
-    id: 'demand',
-    label: 'Cooling water demand scenario',
-    value: 288_000,
-    unit: 'm3/yr',
-    kind: 'demand',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: a scenario volume that varies month to month with climate, taken from a design concept rather than a commitment.',
-    sources: ['ES-CIVILS'],
-  },
-  {
-    id: 'storage',
-    label: 'Sealed storage beneath the buildings',
-    value: 75_000,
-    unit: 'm3',
-    kind: 'store',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: about 1.5 months of contingency at 1.5-2.0 m below ground level, sealed against groundwater interaction.',
-    sources: ['ES-CIVILS'],
-  },
-  {
-    id: 'recharge',
-    label: 'Soakage recharge to the wetland to the south',
-    value: 157_000,
-    unit: 'm3/yr',
-    kind: 'out',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: the recharge system is deliberately designed to maintain the groundwater regime that supports the wetland. This is a licence obligation, not a drainage convenience.',
-    sources: ['ES-CIVILS'],
-  },
-  {
-    id: 'predev',
-    label: 'Pre-development runoff (for comparison)',
-    value: 167_000,
-    unit: 'm3/yr',
+    id: 'capture-share',
+    label: 'Share of site rainfall actually collectable',
+    value: Number((derived.captureFractionOfRainfall * 100).toFixed(1)),
+    unit: '%',
     kind: 'derived',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: about 167,000 m3/yr left the site as overland flow before development. Post-development, a much larger share is captured and used on site.',
-    sources: ['ES-CIVILS'],
+    classification: 'DERIVED',
+    note: `DERIVED: ${fmtInt(derived.runoffCaptureM3Yr)} m³/yr of capture against ${fmtInt(derived.rainfallVolumeM3Yr)} m³/yr falling on the site. Ireland is one of the wettest countries in Europe, and the number above is the practical translation of that fact into a water supply: high rainfall, of which a campus can only reach the small fraction that lands on a roof or a road.`,
+    sources: ['MCC-150605'],
+  },
+  {
+    id: 'wellfield-abstraction',
+    label: 'Wellfield abstraction, the gap rainfall cannot close',
+    value: Number(derived.supplyGapM3Yr.toFixed(0)),
+    unit: 'm³/yr',
+    kind: 'in',
+    classification: 'DERIVED',
+    note: `DERIVED: what the cooling circuit gives up, less what the roofs and hardstands return. The wellfield exists to cover the dry summer, when the capture figure above is a long-term average and not a promise. No Clonee groundwater abstraction figure appears in the sources used here, so this is modelled size, not a consented volume.`,
+    sources: ['MCC-150605', 'SNWA-FB'],
+  },
+  {
+    id: 'wellfield-rate',
+    label: 'Wellfield, continuous equivalent',
+    value: Number(derived.borefieldLPerSecond.toFixed(2)),
+    unit: 'L/s',
+    kind: 'in',
+    classification: 'DERIVED',
+    note: `DERIVED: the gap spread evenly across a year. A real borefield is sized to meet the demand through a dry spell rather than an average year, so the instantaneous design rate would be several times this figure. This number is included because it makes the scale obvious: a handful of production bores, not a river.`,
+    sources: ['MCC-150605'],
+  },
+
+  /* ------------------------------------------------------------- demand */
+  {
+    id: 'cooling-makeup-demand',
+    label: 'Cooling make-up demand',
+    value: Number(derived.dischargeM3Yr.toFixed(0)),
+    unit: 'm³/yr',
+    kind: 'demand',
+    classification: 'DERIVED',
+    note: `DERIVED from the published IT load: ${fmt(derived.itCapacityMW, 0)} MW of consented IT capacity running ${fmtInt(derived.hoursPerYear)} hours, all of which leaves as heat, with ${fmt(A.evaporativeFraction * 100, 0)}% of that heat carried away by evaporation rather than by sensible air flow. Essentially all electrical power into IT equipment leaves as heat, so this demand is a direct consequence of the power figure and of the climate, not an independent estimate.`,
+    sources: ['SNWA-FB', 'EPA-P1192'],
+  },
+  {
+    id: 'heat-to-air',
+    label: 'Heat carried away by air instead of water',
+    value: Number((derived.itHeatGjPerYear * (1 - A.evaporativeFraction)).toFixed(0)),
+    unit: 'GJ/yr',
+    kind: 'derived',
+    classification: 'DERIVED',
+    note: `DERIVED: the remaining ${fmt((1 - A.evaporativeFraction) * 100, 0)}% of the campus heat load leaves by sensible cooling, which is what "indirect air cooling" means. Ireland has almost no cooling degree days, so the economisers can run on outside air for most of the year and the water cost of the plant is confined to the hottest hours.`,
+    sources: ['SNWA-FB'],
   },
   {
     id: 'potable',
-    label: 'Potable (domestic) demand',
-    value: 150,
-    unit: 'm3 storage',
-    kind: 'store',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: a 150 m3 tank fed from 3,000 m2 of support-building roof, physically separated from cooling water. A few days of demand for about 60 staff.',
-    sources: ['ES-CIVILS'],
+    label: 'Potable water for the campus',
+    value: 0,
+    unit: 'm³/yr — no published figure',
+    kind: 'in',
+    classification: 'TYPICAL',
+    note: 'NOT PUBLIC, and deliberately left at zero rather than invented. The consents grant tanks and drainage on the campus, and the architect\'s record confirms an administration building with staff welfare, so a domestic supply exists. No flow, no tank size and no workforce figure is published for Clonee, so this model states the stream rather than quantifying it. Physically it must be separated from the cooling circuit, which carries treatment chemicals.',
+    sources: ['MCC-150605', 'MCC-180671'],
   },
   {
-    id: 'wastewater',
-    label: 'Wastewater to land',
-    value: 1.8,
-    unit: 'm3/day (max 5)',
+    id: 'foul',
+    label: 'Foul water to on-site treatment',
+    value: 0,
+    unit: 'm³/yr — no published figure',
     kind: 'out',
-    classification: 'PUBLIC FACT',
-    note: 'PUBLIC FACT: up to 5,000 L/day, disposed at 5 mm/day through a soakage field of at least 1,000 m2 (3,360 m2 with reserve).',
-    sources: ['ES-RC-DECISION'],
+    classification: 'TYPICAL',
+    note: 'NOT PUBLIC, and left at zero for the same reason. Domestic foul flow on a campus of this size is a staffing-scale flow, orders of magnitude below the cooling stream, and treating it on site rather than discharging to a public sewer is a normal decision at a rural location like this one.',
+    sources: ['MCC-150605', 'MCC-180671'],
+  },
+
+  /* --------------------------------------------------------------- store */
+  {
+    id: 'storage',
+    label: 'Cooling water storage',
+    value: Number(derived.storageM3.toFixed(0)),
+    unit: 'm³',
+    kind: 'store',
+    classification: 'DERIVED',
+    note: `DERIVED: the wellfield gap over a twelfth of a year, with a factor for irregularity of rainfall. Storage of this size is what lets a campus ride out a dry summer on captured water while the borefield makes up the difference, and it is the reason the load-shed sequence sheds water treatment and make-up pumps late rather than first.`,
+    sources: ['MCC-150605'],
+  },
+
+  /* ----------------------------------------------------------------- out */
+  {
+    id: 'evaporation',
+    label: 'Evaporation to atmosphere',
+    value: Number(derived.evaporationM3Yr.toFixed(0)),
+    unit: 'm³/yr',
+    kind: 'out',
+    classification: 'DERIVED',
+    note: `DERIVED: the share of campus heat rejected by evaporation, divided by the latent heat of vaporisation of water at ${fmt(A.evaporationEnthalpy, 2)} MJ/kg, which is physics rather than an assumption. This is the largest single outflow on the campus and it leaves as vapour, not as liquid, which is why it does not appear on any discharge figure.`,
+    sources: ['SNWA-FB', 'EPA-P1192'],
   },
   {
     id: 'blowdown',
     label: 'Blowdown to control chemistry',
-    value: 0,
-    unit: 'm3/yr (not published)',
+    value: Number(derived.blowdownM3Yr.toFixed(0)),
+    unit: 'm³/yr',
     kind: 'out',
-    classification: 'TYPICAL',
-    note: 'NOT PUBLIC: blowdown volumes are not in the public documents. Any closed evaporative loop must blow down to control dissolved solids, so this is a real stream that is simply not quantified in public.',
-    sources: ['ES-CIVILS'],
+    classification: 'DERIVED',
+    note: `DERIVED: evaporation concentrates everything dissolved in the circuit, so a recirculating loop has to discharge blowdown to keep its chemistry in hand. Modelled at ${fmt(A.blowdownFactor, 2)} times the evaporated volume. EPA-P1192 records a residual evaporative cooling-water discharge without publishing a volume, so this figure is sized to make the mechanism legible, not to represent a licensed quantity.`,
+    sources: ['EPA-P1192'],
   },
   {
-    id: 'derived-wue',
-    label: 'Derived: water per unit of compute',
-    value: derived.waterM3PerMwhIt,
-    unit: 'm3 per MWh of IT load',
-    kind: 'derived',
-    classification: 'SIMPLIFIED',
-    note: `SIMPLIFIED arithmetic on published inputs: ${fmt(288000)} m3/yr of demand divided by 240 MW x 8,760 h. ${waterIntensitySentence()} This is the headline number worth remembering: water is the heat rejection medium, so water per unit of compute is a design outcome, not an accident.`,
-    sources: ['ES-CIVILS'],
+    id: 'total-discharge',
+    label: 'Total cooling water discharge',
+    value: Number(derived.dischargeM3Yr.toFixed(0)),
+    unit: 'm³/yr',
+    kind: 'out',
+    classification: 'DERIVED',
+    note: `DERIVED: evaporation plus blowdown, and also the total make-up the site has to find from somewhere. ${waterIntensitySentence()} Water is the heat-rejection medium, so water per unit of compute is a design outcome rather than an accident.`,
+    sources: ['EPA-P1192', 'SNWA-FB'],
   },
   {
-    id: 'derived-gap',
-    label: 'Derived: shortfall covered by groundwater',
-    value: Math.round(derived.supplyGapM3Yr),
-    unit: 'm3/yr',
+    id: 'stormwater-outfall',
+    label: 'Stormwater outfall to the receiving watercourse',
+    value: Number((derived.rainfallVolumeM3Yr - derived.runoffCaptureM3Yr).toFixed(0)),
+    unit: 'm³/yr of site rainfall not collected',
+    kind: 'out',
+    classification: 'DERIVED',
+    note: 'DERIVED as the balance of site rainfall that is not captured for reuse. The licence requires stormwater and environmental systems to be managed and a cooling-water discharge is permitted, so a licensed discharge point exists, but no receiving watercourse is named and no runoff volume is published in the sources used here. Treat the watercourse on this model as an unnamed element of normal practice.',
+    sources: ['EPA-P1192', 'MCC-150605'],
+  },
+
+  /* ------------------------------------------------------------- derived */
+  {
+    id: 'wue',
+    label: 'Water use effectiveness',
+    value: Number(derived.wueM3PerMwh.toFixed(4)),
+    unit: 'm³ per MWh of IT load',
     kind: 'derived',
-    classification: 'SIMPLIFIED',
-    note: 'SIMPLIFIED arithmetic: 288,000 m3/yr demand less about 75,000 m3/yr of rainfall capture. The consented take exists to cover a gap of roughly this size, which is why the groundwater number and the demand number are the same order of magnitude.',
-    sources: ['ES-CIVILS', 'ES-PERMIT'],
+    classification: 'DERIVED',
+    note: `DERIVED: total discharge divided by annual IT energy. ${waterIntensitySentence()} This is the single number worth remembering from the water panel. An air-cooled campus in a cool maritime climate should be an order of magnitude better than a chilled-water campus in a hot one, and this figure is what that advantage looks like once you have put a number on it.`,
+    sources: ['SNWA-FB', 'EPA-P1192'],
+  },
+  {
+    id: 'groundwater-dependency',
+    label: 'Share of the circuit supplied by rain',
+    value: Number((derived.groundwaterCoverage * 100).toFixed(1)),
+    unit: '%',
+    kind: 'derived',
+    classification: 'DERIVED',
+    note: `DERIVED: captured runoff against total discharge. The remainder, ${fmt(100 - derived.groundwaterCoverage * 100, 0)}%, comes from the wellfield. Read as a design question it asks whether the campus is genuinely rainwater-led or merely rainwater-assisted, and the answer here is assisted.`,
+    sources: ['MCC-150605'],
   },
 ];
 
-/** Sanity narrative shown in the water panel. */
+/**
+ * Teaching prose for the water panel. Short paragraphs, each making one point
+ * that a reader could get wrong.
+ */
 export const WATER_NARRATIVE: string[] = [
-  'Where water enters: rain onto 95,000 m2 of roof and hardstand (about 75,000 m3/yr captured), plus groundwater from a bore field of four to five bores at up to 7 L/s as the backstop.',
-  'Where it goes: mostly into the air. The cooling plant is evaporative, so roughly the entire annual demand leaves as vapour. That is why the consent decision records that water vapour may be visible near the site in some conditions.',
-  'What stays behind: the closed loop concentrates chemicals and solids, so blowdown is required even though the public documents do not quantify it.',
-  'What the site gives back: about 157,000 m3/yr of treated stormwater recharged into the aquifer, deliberately, to hold up the groundwater that supports the wetland to the south.',
-  `The scale insight: cooling water use is ${fmt(derived.waterM3PerMwhIt, 3)} m3 per MWh of IT load. Compare that with potable water at about 2 m3 per day for the whole workforce - a factor of roughly ${fmt(Math.round((derived.waterM3PerMwhIt * 40) / 2))} apart, in the same campus.`,
+  `Where the water comes from, first: rain. The consented site is ${fmtInt(INPUTS.siteAreaHa * 10_000)} m² and long-term rainfall for County Meath is around ${fmtInt(A.longTermRainfallMmYr)} mm a year, so roughly ${fmtInt(derived.rainfallVolumeM3Yr)} m³ falls on it annually. That number is a trap. Most of a data centre site is building, plant compound, road and parking, so what matters is not how much rain falls but how much of it lands somewhere a pipe can reach: about ${fmtInt(derived.imperviousAreaM2)} m² of roof and hardstand, of which ${fmtInt(derived.runoffCaptureM3Yr)} m³ a year can realistically be collected.`,
+  `The cooling demand follows from the power. ${fmt(derived.itCapacityMW, 0)} MW of consented IT load at ${fmtInt(derived.hoursPerYear)} hours a year is ${fmtInt(derived.itHeatGjPerYear)} GJ of heat, because essentially every joule entering a server leaves it as heat. Ireland has almost no cooling degree days, so for most of the year the outside-air economisers carry that load on their own and the evaporative stage barely runs. The modelled figure of ${fmtInt(derived.evaporationM3Yr)} m³/yr of evaporation corresponds to ${fmt(A.evaporativeFraction * 100, 0)}% of the heat load, and that small fraction is the direct consequence of a cool maritime climate rather than a design choice.`,
+  `This is why a data centre in one of Europe's wettest countries still holds a water licence with a discharge condition. The plant is air-cooled, so it uses very little water, but it is an evaporative-assisted air-cooled plant, so it uses some, and any residual discharge is regulated water. EPA-P1192 records exactly that: a residual evaporative cooling-water discharge. It publishes no volume, which is why the discharge figure on this panel is DERIVED rather than quoted. The tension between "indirect air cooling" in the architect's record and a licensed water discharge in the emissions licence is real, and the resolution is a plant that runs dry for most of the year and wet only when the weather demands it.`,
+  `Where the demand goes is mostly into the air. Evaporation is ${fmtInt(derived.evaporationM3Yr)} m³/yr and blowdown to control chemistry is ${fmtInt(derived.blowdownM3Yr)} m³/yr on top of it, because a recirculating loop concentrates everything dissolved in it. Together that is ${fmtInt(derived.dischargeM3Yr)} m³/yr of make-up the site has to find, and it is also the water a wellfield has to cover when the roofs do not deliver a long-term average.`,
+  `The two sources that matter are therefore both on site. Captured runoff supplies ${fmt(derived.groundwaterCoverage * 100, 0)}% of what the circuit gives up; a wellfield sized for a dry summer finds the remaining ${fmt(100 - derived.groundwaterCoverage * 100, 0)}%, about ${fmtInt(derived.supplyGapM3Yr)} m³/yr or ${fmt(derived.borefieldLPerSecond, 1)} L/s spread across the year. Storage of roughly ${fmtInt(derived.storageM3)} m³ sits between the two, which is what lets the campus ride out a dry spell and is why water treatment and make-up are shed late rather than first in an emergency.`,
+  `The domestic side of the water balance is a different order of magnitude entirely, and this is the part of the panel that is empty on purpose. Potable supply and foul treatment both exist — tanks and drainage are consented, and there is an administration building with staff welfare — but no flow, tank size or workforce figure is published for Clonee. Those rows are marked TYPICAL and left at zero rather than given an invented number.`,
+  `The number to carry away is the intensity: ${fmt(derived.wueM3PerMwh, 3)} m³ of site water per MWh of IT load. Because the water is the heat-rejection medium, that figure is simultaneously the water used per kWh of heat rejected. It is a design outcome rather than an accident, and it is the reason climate, not drought, is the variable that decides how water-secure a data centre is.`,
 ];
 
-/** Capacity explanation: why different published capacity numbers are not the same thing. */
+/**
+ * Why the published capacity numbers are not the same quantity.
+ *
+ * This panel exists because real projects publish contradictory figures. The
+ * product refuses to average them away, and each claim below says what the
+ * figure means and what it does not.
+ */
 export interface CapacityClaim {
   figure: string;
-  label: string;
+  source: string;
   means: string;
   doesNotMean: string;
-  classification: 'PUBLIC FACT' | 'TYPICAL' | 'SIMPLIFIED';
+  classification: 'PUBLIC FACT' | 'DERIVED' | 'TYPICAL';
 }
 
 export const CAPACITY_CLAIMS: CapacityClaim[] = [
   {
-    figure: '240 MW',
-    label: 'Consented IT capacity',
-    means: 'The electrical load of the IT equipment itself: servers, storage, network. This is the figure in the consent decision and application documents.',
-    doesNotMean: 'It is not the campus total electrical demand. Cooling plant, pumps, fans, generators, controls and lighting sit on top of it.',
+    figure: `${INPUTS.itMwPerBuilding} MW per building`,
+    source: 'MCC-150605',
+    means: 'The consented electrical load of the IT equipment in one building: servers, storage and network. The consent grants this figure per building and the emissions licence names five buildings.',
+    doesNotMean: 'It is not the campus total, and it is not total facility demand. Cooling plant, pumps, fans, controls and lighting sit on top of it, and none of that is inside the 36 MW.',
     classification: 'PUBLIC FACT',
   },
   {
-    figure: '280 MW',
-    label: 'Publicly circulated higher figure',
-    means: 'A larger number reported publicly (developer material and media) alongside the consented 240 MW.',
-    doesNotMean: 'The documents do not reconcile the two. It may be total facility demand, a later or higher planning figure, or a different definition of capacity. Treat any use of it as an assumption.',
+    figure: `${fmt(derived.itCapacityMW, 0)} MW IT`,
+    source: 'MCC-150605 and EPA-P1192, multiplied together',
+    means: `DERIVED: the consented per-building figure applied to the five buildings the licence names. It is the campus IT load this model uses, and it is what the model sizes cooling and generation against.`,
+    doesNotMean: 'It is not a published number. The consent itself only ever names two buildings, so this is the model reading the two documents together rather than a figure either document states.',
+    classification: 'DERIVED',
+  },
+  {
+    figure: `${INPUTS.powerSupplyMva} MVA power supply`,
+    source: 'SNWA-FB',
+    means: 'The published power supply for the three original buildings. MVA is an apparent-power unit, so it describes the rating of the supply rather than the real power drawn, and it is a supply figure for part of the campus.',
+    doesNotMean: `It does not mean ${INPUTS.powerSupplyMva} MW, and it does not describe the five-building campus. Against three times ${INPUTS.itMwPerBuilding} MW it is very close to unity, which tells you it describes the IT feed rather than the whole facility draw.`,
     classification: 'PUBLIC FACT',
   },
   {
-    figure: '268.8 MW',
-    label: 'Generator fleet rating',
-    means: 'PUBLIC FACT arithmetic: 84 sets x 3.2 MW. This is generated capacity, available only when the fleet is running.',
-    doesNotMean: 'It is not a capacity figure for the facility at all, and it is not a redundancy margin you can rely on: diesel generators are derated for altitude and temperature, and 84 sets cannot all take block load at once.',
-    classification: 'SIMPLIFIED',
+    figure: `${fmt(derived.itCapacityFromDensityMW, 0)} MW from area and density`,
+    source: 'SNWA-FB',
+    means: `DERIVED: the published IT area of ${fmtInt(INPUTS.itAreaM2)} m² multiplied by the published ${INPUTS.itPowerDensityKwM2} kW/m². It is an independent second route to the same quantity, and it agrees with the ${fmt(derived.itCapacityMW, 0)} MW route to within ${fmt(derived.capacityRoutesDifferPct, 1)}%.`,
+    doesNotMean: `It does not mean ${fmt(derived.itCapacityMW, 0)} MW, and it is not a competing estimate to be reconciled away. Two published routes that nearly agree is the strongest evidence available here; the ${fmt(derived.capacityRoutesDifferPct, 1)}% residual is what remains after rounding and scope differences between documents.`,
+    classification: 'DERIVED',
   },
   {
-    figure: '~80 MW per module',
-    label: 'Model module split',
-    means: 'SIMPLIFIED: an equal split of the 240 MW IT figure across three modules, used so the model can size electrical and cooling plant per module.',
-    doesNotMean: 'The public record does not publish a per-module capacity. The real split could be uneven.',
-    classification: 'SIMPLIFIED',
+    figure: `Nearly ${fmtInt(INPUTS.gfaM2TotalNearly)} m²`,
+    source: 'META-2019',
+    means: 'Total facility floor area after the two-building expansion, as published by the operator. It is the campus footprint including halls, internal plant, administration and the substation.',
+    doesNotMean: 'It is not a power figure and it does not imply a density. Dividing it by a rack count or a kW/m² gives a number that means nothing, because the area is a mixture of white space, plant and offices.',
+    classification: 'PUBLIC FACT',
   },
   {
-    figure: '445.2 MW',
-    label: 'Generator heat release',
-    means: 'PUBLIC FACT: 5.3 MW of heat per set. This is the reason a campus that is not selling a single megawatt still needs a large cooling plant.',
-    doesNotMean: 'It is not IT load and it is not cooling load: it is heat produced by the backup plant itself, and it needs its own heat rejection.',
+    figure: `${fmt(INPUTS.publishedCampusMw, 0)} MW campus capacity`,
+    source: 'META-DC',
+    means: 'The operator\'s current published capacity for the campus, alongside a cumulative investment figure. It is the most recent public statement of the whole site rather than a per-building consent condition.',
+    doesNotMean: `It does not supersede the consent, and it is not reconciled to it by any document. It exceeds the ${fmt(derived.itCapacityMW, 0)} MW derived from the consent, and neither figure explains the difference — later phases, a different definition of capacity, or a round figure. Treat the gap as an open question rather than as an error in either number.`,
     classification: 'PUBLIC FACT',
   },
 ];

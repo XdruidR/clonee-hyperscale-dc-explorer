@@ -1,19 +1,35 @@
 import { useState } from 'react';
-import { SOURCES } from '../data/sources';
-import { FACTS, CLASSIFICATION_MEANING, CLASSIFICATION_COLORS } from '../data/facts';
+import { CLASSIFICATION_COLORS, CLASSIFICATION_MEANING, FACTS } from '../data/facts';
+import { SOURCES, SOURCE_KIND_MEANING } from '../data/sources';
+import { CLASSIFICATIONS } from '../data/types';
+import { PHASES } from '../data/phases';
+import { capacityReconciliationSentence, derived, fmtInt } from '../data/calculations';
+import { Badge, Cite } from './common';
 
+type Tab = 'method' | 'facts' | 'sources';
+
+/**
+ * Method, public facts and sources.
+ *
+ * The method tab is where the honesty rule is stated, because the evidence system
+ * is load-bearing and a reader who does not understand it will misread the rest
+ * of the application. The "what is not public" section is deliberately a full
+ * section rather than a footnote: the boundary of the record is part of the
+ * product.
+ */
 export function SourcesPanel({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<'method' | 'facts' | 'sources'>('method');
+  const [tab, setTab] = useState<Tab>('method');
+  const horizon = PHASES.find((p) => p.id === 'horizon');
 
   return (
     <div className="sources" onClick={onClose}>
       <div className="sources-inner" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ marginBottom: 0 }}>Research, provenance and method</h2>
-          <button onClick={onClose}>Close ✕</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <h2>Research, provenance and method</h2>
+          <button onClick={onClose}>Close</button>
         </div>
 
-        <div className="tabs2" style={{ marginTop: 12 }}>
+        <div className="tabs2">
           <button className={tab === 'method' ? 'active' : ''} onClick={() => setTab('method')}>
             Method
           </button>
@@ -26,135 +42,153 @@ export function SourcesPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {tab === 'method' && (
-          <div>
+          <>
             <p>
-              This application is a teaching model of a <b>fictional generic hyperscale data centre campus on the Southland
-              plains</b>. It is informed by, but is not a reproduction of, publicly available consenting and
-              construction documentation for a large hyperscale / AI data centre project developed near Makarewa and
-              Invercargill, New Zealand.
+              This application reconstructs the Meta data centre campus at Clonee, County Meath, as a teaching model. It
+              is not a digital twin and it is not a design. It uses as much public information as is reasonably available,
+              fills the gaps with accepted hyperscale design practice, and says which is which.
             </p>
+            <p>
+              The campus has <strong>five data-storage buildings</strong> — CLN1, CLN2, CLN3, CLN5 and CLN6, with{' '}
+              <strong>no CLN4</strong> — <strong>twenty data halls</strong> of approximately 4,170 m² each,{' '}
+              <strong>ninety diesel generators</strong>, and a dedicated customer-built <strong>220 kV substation</strong>{' '}
+              that EirGrid records as completed in August 2017.
+            </p>
+
             <h3>The classification rule</h3>
             <p>
-              Every technical claim in this application carries one of four labels. The label is shown on component
-              labels, in the inspector, and in the fact register below.
+              Every claim in the model carries one of four labels. The label is visible wherever a claim is made, and turn
+              on <strong>evidence mode</strong> in the toolbar to see it on labels and in panels.
             </p>
-            {(['PUBLIC FACT', 'TYPICAL', 'SIMPLIFIED', 'SYNTHETIC'] as const).map((k) => (
-              <div key={k} className="callout">
-                <span className="swatch" style={{ background: CLASSIFICATION_COLORS[k], width: 10, height: 10 }} />
-                <b> {k}</b> — {CLASSIFICATION_MEANING[k]}
+            {CLASSIFICATIONS.map((c) => (
+              <div key={c} className="callout" style={{ borderLeftColor: CLASSIFICATION_COLORS[c], borderLeftWidth: 1 }}>
+                <Badge c={c} /> {CLASSIFICATION_MEANING[c]}
               </div>
             ))}
-            <h3>The honesty rule</h3>
-            <ul>
+            <p>
+              The rule that keeps this honest: <strong>invention is allowed, misrepresentation is not.</strong> Where a
+              value has to be assumed, the assumption is declared in one place with its own classification and a written
+              reason, and the interface shows it as an assumption.
+            </p>
+
+            <h3>What is not public</h3>
+            {horizon && <p>{horizon.detail}</p>}
+            <p>
+              Specifically absent from the record, and therefore never asserted here: campus single-line diagrams;
+              generator ratings and their distribution between buildings; transformer ratings; switchgear lineups; UPS
+              architecture and autonomy; cooling plant counts, ratings and control logic; the achieved redundancy rating;
+              internal hall layout; and any historical programme or cost data.
+            </p>
+
+            <h3>The capacity figures do not agree, and that is the point</h3>
+            <p>{capacityReconciliationSentence()}</p>
+            <p>
+              Beyond that, the sources quote {fmtInt(derived.itCapacityMW)} MW from the consent, 108 MVA from the design
+              record, nearly 150,000 m² of floor area, and a higher current figure from the operator. Each is carried in
+              the fact register with what it means and what it does not mean. None is averaged into the others.
+            </p>
+
+            <h3>How the model is built</h3>
+            <ul className="plain">
               <li>
-                The public record for the reference project runs out at a certain level of detail. It confirms a
-                substation, switchgear, generators, an adiabatic cooling plant, water treatment, stormwater works and a
-                subsea cable. It does <b>not</b> publish transformer ratings, UPS topology, redundancy architecture,
-                piping arrangements, equipment models or a one-line diagram.
+                <strong>Data layer.</strong> Every published input lives in one file with its source ids. Every derived
+                quantity is computed once, there, and the interface reads from that. No panel restates a number by hand.
               </li>
               <li>
-                Where the public record stops, this application says so and shows <b>one typical implementation</b>,
-                labelled as such. It never implies that a typical arrangement is what the project has built.
+                <strong>Flow graph.</strong> Energy, water, air and data move along an explicit graph of about 350 links,
+                each with its own provenance label. If a link is wrong, the reachability checks in the self test fail.
               </li>
               <li>
-                No company, client, contractor or designer name appears anywhere in the interface, in component names, in
-                the geometry, or in this model&apos;s data. Project names appear only in the source register, where a
-                provenance record has to identify documents accurately.
+                <strong>3D layer.</strong> About 300 components and roughly 20,000 rendered instances, all instanced, with
+                a single construction timeline carried on each component rather than in a second table.
               </li>
               <li>
-                No cost, programme date or capacity figure from the reference project is used. All cost bands, WBS
-                codes and durations are synthetic placeholders, marked SYNTHETIC.
-              </li>
-              <li>
-                Where sources disagree — for example on IT capacity, hall height or site area — both figures are shown
-                and the disagreement is explained rather than resolved silently.
-              </li>
-            </ul>
-            <h3>Architecture</h3>
-            <ul>
-              <li>
-                <b>Data layer</b> — a single declarative campus model. Components are records with a geometry type,
-                position, size, instancing offsets, construction window and systems membership. Every other view (3D,
-                flow animation, delivery layer, commissioning) is derived from that one model, so nothing can drift out
-                of sync with anything else.
-              </li>
-              <li>
-                <b>Flow graph</b> — the connectivity graph is also the dependency graph. The commissioning blocker
-                messages you see are computed from the same edges the animated flows are drawn from.
-              </li>
-              <li>
-                <b>3D layer</b> — React Three Fiber. Repeated equipment (generators, racks, accelerators, cold plates,
-                switches, CDUs) is drawn as instanced geometry so a campus with thousands of items stays interactive.
-              </li>
-              <li>
-                <b>Construction model</b> — each component carries a phase window. Modules are offset from each other so
-                the model shows phased delivery rather than a single simultaneous build.
+                <strong>Commissioning model.</strong> Turnover packages with real cross-package dependencies, so a
+                component's status is computed over its whole upstream closure rather than over its own package.
               </li>
             </ul>
-          </div>
+
+            <h3>Project controls</h3>
+            <p>
+              The delivery and cost model is <strong>synthetic</strong> and generated from the same phase list as the 3D
+              model, so the two cannot disagree. Its anchors are real: published Irish cost-per-MW figures, the operator's
+              published workforce, and the published commissioning cost ratio. No transaction in it is historical, and
+              nothing in it should be read as a claim about the real project.
+            </p>
+
+            <h3>Integrity</h3>
+            <p>
+              The self test in <code>scripts/selftest.ts</code> checks that every geometry type has metadata, every
+              citation resolves, the flow graph reaches what the panels claim it reaches, the commissioning graph blocks
+              correctly, the construction timeline is single-sourced, and the derived arithmetic agrees with the published
+              figures when recomputed independently.
+            </p>
+          </>
         )}
 
         {tab === 'facts' && (
-          <div>
-            <p className="tiny">
-              Every public quantity used anywhere in the application, with its source ids. Derived rows are arithmetic
-              on those quantities and are labelled SIMPLIFIED.
+          <>
+            <p>
+              Every fact in the model, with its classification and sources. Values that restate the consent or the
+              licence are marked as public facts; values computed from them are derived; values describing normal
+              practice are typical.
             </p>
             <table className="simple">
               <thead>
                 <tr>
-                  <th style={{ width: '22%' }}>Item</th>
-                  <th style={{ width: '24%' }}>Value</th>
-                  <th style={{ width: 16 }}>Label</th>
+                  <th>Item</th>
+                  <th>Value</th>
+                  <th>Label</th>
                   <th>Note and sources</th>
                 </tr>
               </thead>
               <tbody>
                 {FACTS.map((f) => (
                   <tr key={f.id}>
-                    <td>{f.label}</td>
+                    <td>
+                      <b>{f.label}</b>
+                    </td>
                     <td className="mono">{f.value}</td>
                     <td>
-                      <span className="swatch" style={{ background: CLASSIFICATION_COLORS[f.classification] }} />
-                      {f.classification}
+                      <Badge c={f.classification} />
                     </td>
                     <td>
-                      {f.note}{' '}
-                      <b>{f.sources.join(', ')}</b>
+                      {f.note}
+                      <div>
+                        <Cite ids={f.sources} />
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </>
         )}
 
         {tab === 'sources' && (
-          <div>
-            <p className="tiny">
-              Public documents are cited by id. Consent and council material is public; industry material supports only
-              TYPICAL claims. Where a press report is cited it is cited to record that a figure circulates publicly, not
-              as an authority.
+          <>
+            <p>
+              The source register. Planning and environmental documents carry the project facts; industry, standards and
+              press sources are used only for typical practice or for delivery context, and are labelled as such wherever
+              they are cited.
             </p>
             {SOURCES.map((s) => (
-              <div key={s.id} style={{ margin: '12px 0' }}>
-                <div className="mono" style={{ color: 'var(--accent)' }}>
-                  {s.id}
-                </div>
-                <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+              <div key={s.id} className="source-item">
+                <div>
                   <a className="src-link" href={s.url} target="_blank" rel="noreferrer">
-                    {s.title}
-                  </a>
+                    {s.id}
+                  </a>{' '}
+                  <b>{s.title}</b>
                 </div>
-                <div className="tiny">
-                  {s.publisher} · {s.date} · <b>{s.kind}</b>
+                <div className="meta">
+                  {s.publisher} · {s.date} · {SOURCE_KIND_MEANING[s.kind]}
                 </div>
-                <div className="tiny" style={{ marginTop: 3 }}>
+                <div className="used">
                   <b>Used for:</b> {s.usedFor}
                 </div>
               </div>
             ))}
-          </div>
+          </>
         )}
       </div>
     </div>

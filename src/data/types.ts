@@ -1,7 +1,18 @@
+/**
+ * Shared vocabulary for the Clonee model.
+ *
+ * Three ideas are fixed here and everything else depends on them:
+ *
+ *   1. The seven physical systems a data centre is made of.
+ *   2. The four evidence classifications, which every claim in the application
+ *      carries. This is the product's spine, so it lives in one place.
+ *   3. The turnover package vocabulary, which is what actually gets built.
+ */
+
 export type SystemKey = 'power' | 'cooling' | 'water' | 'data' | 'site' | 'security' | 'fire';
 
 export const SYSTEM_META: Record<SystemKey, { label: string; color: string; blurb: string }> = {
-  power: { label: 'POWER', color: '#ffcf3f', blurb: 'Grid to GPU' },
+  power: { label: 'POWER', color: '#ffcf3f', blurb: 'Grid to rack' },
   cooling: { label: 'COOLING', color: '#ff6b5b', blurb: 'Heat to air' },
   water: { label: 'WATER', color: '#38bdf8', blurb: 'In, through, out' },
   data: { label: 'DATA', color: '#a78bfa', blurb: 'Fibre to server' },
@@ -10,7 +21,21 @@ export const SYSTEM_META: Record<SystemKey, { label: string; color: string; blur
   fire: { label: 'FIRE', color: '#f87171', blurb: 'Detection and suppression' },
 };
 
-export type Classification = 'PUBLIC FACT' | 'TYPICAL' | 'SIMPLIFIED' | 'SYNTHETIC';
+/**
+ * How much to trust a statement, and what kind of thing it is.
+ *
+ * PUBLIC FACT  Stated in publicly available documentation for the Clonee
+ *              project. Carries source ids.
+ * DERIVED     Arithmetic on public inputs, or deliberately simplified so the
+ *              model can be rendered and read. The arithmetic is shown.
+ * TYPICAL     Accepted hyperscale design practice from industry material. Not
+ *              a statement about Clonee.
+ * SYNTHETIC   Invented, to demonstrate a delivery or project-controls concept.
+ *              Never a project fact.
+ */
+export type Classification = 'PUBLIC FACT' | 'DERIVED' | 'TYPICAL' | 'SYNTHETIC';
+
+export const CLASSIFICATIONS: Classification[] = ['PUBLIC FACT', 'DERIVED', 'TYPICAL', 'SYNTHETIC'];
 
 export interface Vec3 {
   x: number;
@@ -51,13 +76,30 @@ export const PACKAGE_COLOR: Record<Package, string> = {
   'IT FITOUT': '#c084fc',
 };
 
+export const PACKAGES: Package[] = [
+  'CIVIL',
+  'BUILDING',
+  'HV',
+  'MV/LV ELECTRICAL',
+  'GENERATION',
+  'MECHANICAL',
+  'COOLING',
+  'WATER',
+  'FIRE',
+  'ICT',
+  'CONTROLS',
+  'SECURITY',
+  'COMMISSIONING',
+  'IT FITOUT',
+];
+
 /**
  * A single statement with its own provenance.
  *
- * A component's headline classification is not enough: a component can be
- * PUBLIC FACT while an individual technical bullet is a TYPICAL assumption.
- * `technical` accepts either a plain string - which inherits the component's
- * classification - or an explicit Claim when the statement needs its own label
+ * A component's headline classification is not enough. A component can be a
+ * PUBLIC FACT while one individual bullet about it is TYPICAL. `technical`
+ * accepts either a plain string, which inherits the component's
+ * classification, or an explicit Claim when the statement needs its own label
  * and sources.
  */
 export interface Claim {
@@ -101,7 +143,7 @@ export interface ComponentInfo {
   cxStages: string[];
   provenance: Classification;
   facts?: string[];
-  /** typical-only caveat shown in evidence mode */
+  /** the boundary of the public record, shown in evidence mode */
   publicLimit?: string;
   /** interfaces that historically cause trouble on this kind of equipment */
   interfaceRisk?: string[];
@@ -110,20 +152,3 @@ export interface ComponentInfo {
   /** the question to ask in a meeting about this equipment */
   meetingQuestion?: string;
 }
-
-export const PACKAGES: Package[] = [
-  'CIVIL',
-  'BUILDING',
-  'HV',
-  'MV/LV ELECTRICAL',
-  'GENERATION',
-  'MECHANICAL',
-  'COOLING',
-  'WATER',
-  'FIRE',
-  'ICT',
-  'CONTROLS',
-  'SECURITY',
-  'COMMISSIONING',
-  'IT FITOUT',
-];

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SystemKey } from '../data/types';
-import { COMPONENTS, type CampusComponent } from '../data/campus';
+import { COMPONENTS, BUILDINGS, type CampusComponent } from '../data/campus';
 import { PHASES } from '../data/phases';
 import { CX_STAGES } from '../data/commissioning';
 import {
@@ -19,13 +19,23 @@ export type Mode =
   | 'data'
   | 'resilience'
   | 'construction'
-  | 'commissioning';
+  | 'commissioning'
+  | 'controls'
+  | 'ai';
 
 export interface CameraRequest {
   pos: [number, number, number];
   target: [number, number, number];
   token: number;
 }
+
+const LAST_PHASE = PHASES.length - 1;
+
+/** The opening shot: the whole 95.5 ha campus from the north-west, at dusk. */
+export const HOME_CAMERA = {
+  pos: [820, 560, 900] as [number, number, number],
+  target: [-30, 0, 20] as [number, number, number],
+};
 
 interface State {
   mode: Mode;
@@ -45,37 +55,53 @@ interface State {
   gridPlaying: boolean;
   /** packageId -> completed stage ids. Commissioning is asset-specific. */
   cx: Record<string, string[]>;
-  cxRunning: boolean;
+  /** data date index for the project-controls scrub, into CONTROLS_MONTHS */
+  controlsMonth: number;
+  /** active project-controls scenario id, or null */
+  scenario: string | null;
+  /** the modelled AI retrofit is applied to CLN2 hall 3 */
+  aiRetrofit: boolean;
   faults: string[];
-  isolateHall: number | null;
+  /** campus reading index 1..5, mapping to CLN1, CLN2, CLN3, CLN5, CLN6 */
+  isolateBuilding: number | null;
   isolateTrain: 'power' | 'cooling' | null;
   journey: { id: string; step: number } | null;
   camera: CameraRequest;
   panelOpen: boolean;
   /** which bottom sheet is open in the phone layout */
   sheet: 'mode' | 'inspect' | 'learn' | 'view' | null;
+
   setSheet: (s: 'mode' | 'inspect' | 'learn' | 'view' | null) => void;
   setMode: (m: Mode) => void;
   select: (id: string | null, focus?: boolean) => void;
   hover: (id: string | null) => void;
-  toggle: (k: 'roofOff' | 'cutaway' | 'labels' | 'flows' | 'deliveryLayer' | 'evidenceMode' | 'panelOpen') => void;
+  toggle: (
+    k: 'roofOff' | 'cutaway' | 'labels' | 'flows' | 'deliveryLayer' | 'evidenceMode' | 'panelOpen' | 'aiRetrofit',
+  ) => void;
   setExplode: (v: number) => void;
   setDayNight: (v: 'day' | 'dusk' | 'night') => void;
   setColourBy: (v: 'system' | 'package') => void;
   setConstructPhase: (p: number) => void;
   setGridPhase: (p: number) => void;
   setGridPlaying: (p: boolean) => void;
+  setControlsMonth: (m: number) => void;
+  setScenario: (id: string | null) => void;
   completePackageStage: (pkgId: string, stageId: string) => void;
   resetCx: () => void;
   toggleFault: (type: string) => void;
   clearFaults: () => void;
-  setIsolateHall: (h: number | null) => void;
+  setIsolateBuilding: (b: number | null) => void;
   setIsolateTrain: (t: 'power' | 'cooling' | null) => void;
   startJourney: (id: string) => void;
   setJourneyStep: (step: number) => void;
   endJourney: () => void;
   moveCamera: (pos: [number, number, number], target: [number, number, number]) => void;
 }
+
+/** Modes that look inside the buildings, and therefore open the roofs. */
+const INTERIOR_MODES: Mode[] = ['power', 'cooling', 'data', 'resilience', 'ai'];
+/** Modes that need the envelope to stay closed to read as a campus. */
+const EXTERIOR_MODES: Mode[] = ['construction', 'overview'];
 
 export const useStore = create<State>((set, get) => ({
   mode: 'overview',
@@ -90,16 +116,18 @@ export const useStore = create<State>((set, get) => ({
   colourBy: 'system',
   deliveryLayer: false,
   evidenceMode: false,
-  constructPhase: PHASES.length - 1,
+  constructPhase: LAST_PHASE,
   gridPhase: 0,
   gridPlaying: false,
   cx: {},
-  cxRunning: false,
+  controlsMonth: LAST_PHASE,
+  scenario: null,
+  aiRetrofit: false,
   faults: [],
-  isolateHall: null,
+  isolateBuilding: null,
   isolateTrain: null,
   journey: null,
-  camera: { pos: [560, 430, 640], target: [-40, 0, 20], token: 0 },
+  camera: { ...HOME_CAMERA, token: 0 },
   panelOpen: true,
   sheet: 'mode',
 
@@ -109,17 +137,23 @@ export const useStore = create<State>((set, get) => ({
    * Switching mode also sets a sensible interior view, because a power, cooling
    * or network story is invisible through a closed roof. The user can override
    * it with the roof and cutaway toggles.
+   *
+   * The AI mode also switches the retrofit on, because showing a hall with cold
+   * plates that are not there would be the more confusing of the two mistakes.
    */
   setMode: (m) =>
     set({
       mode: m,
       journey: null,
       isolateTrain: null,
-      roofOff: m === 'power' || m === 'cooling' || m === 'data' || m === 'resilience',
-      cutaway: m === 'power' || m === 'cooling' || m === 'data',
+      scenario: null,
+      roofOff: INTERIOR_MODES.includes(m),
+      cutaway: m === 'power' || m === 'cooling' || m === 'data' || m === 'ai',
       explode: 0,
-      ...(m === 'construction' ? { roofOff: false, cutaway: false } : {}),
+      aiRetrofit: m === 'ai' ? true : m === 'overview' ? false : undefined,
+      ...(EXTERIOR_MODES.includes(m) ? { roofOff: false, cutaway: false } : {}),
     }),
+
   select: (id, focus = true) => {
     set((prev) => ({ selected: id, ...(id && prev.sheet === 'mode' ? { sheet: 'inspect' as const } : {}) }));
     if (id && focus) {
@@ -135,9 +169,11 @@ export const useStore = create<State>((set, get) => ({
   setExplode: (v) => set({ explode: v }),
   setDayNight: (v) => set({ dayNight: v }),
   setColourBy: (v) => set({ colourBy: v }),
-  setConstructPhase: (p) => set({ constructPhase: Math.max(0, Math.min(PHASES.length - 1, p)) }),
+  setConstructPhase: (p) => set({ constructPhase: Math.max(0, Math.min(LAST_PHASE, p)) }),
   setGridPhase: (p) => set({ gridPhase: Math.max(0, p) }),
   setGridPlaying: (p) => set({ gridPlaying: p }),
+  setControlsMonth: (m) => set({ controlsMonth: Math.max(0, Math.min(LAST_PHASE, m)) }),
+  setScenario: (id) => set({ scenario: id }),
   completePackageStage: (pkgId, stageId) =>
     set((s) => {
       const done = s.cx[pkgId] ?? [];
@@ -148,7 +184,7 @@ export const useStore = create<State>((set, get) => ({
   toggleFault: (type) =>
     set((s) => ({ faults: s.faults.includes(type) ? s.faults.filter((f) => f !== type) : [...s.faults, type] })),
   clearFaults: () => set({ faults: [] }),
-  setIsolateHall: (h) => set({ isolateHall: h }),
+  setIsolateBuilding: (b) => set({ isolateBuilding: b }),
   setIsolateTrain: (t) => set({ isolateTrain: t }),
   startJourney: (id) => set({ journey: { id, step: 0 }, selected: null }),
   setJourneyStep: (step) => set((s) => (s.journey ? { journey: { ...s.journey, step } } : {})),
@@ -166,13 +202,13 @@ export const useStore = create<State>((set, get) => ({
  * The camera field of view is vertical, so a portrait phone at 412x915 sees
  * roughly half the horizontal extent of a desktop at 1600x900 even though the
  * camera has not moved. Pulling back by the inverse aspect ratio keeps the
- * campus framed on a phone instead of showing one hall.
+ * campus framed on a phone instead of showing one building.
  */
 export function frameScale(): number {
   if (typeof window === 'undefined') return 1;
   const aspect = window.innerWidth / Math.max(1, window.innerHeight);
   if (aspect >= 1.2) return 1;
-  return Math.min(2.4, 0.95 / Math.max(0.3, aspect));
+  return Math.min(2.6, 0.95 / Math.max(0.3, aspect));
 }
 
 export function framed(pos: [number, number, number], target: [number, number, number]) {
@@ -183,7 +219,7 @@ export function framed(pos: [number, number, number], target: [number, number, n
      transformer does not, and doubling its distance would turn it into a
      mid-shot and lose the point of the step. */
   const d = Math.hypot(pos[0] - target[0], pos[1] - target[1], pos[2] - target[2]);
-  const wide = Math.max(0, Math.min(1, (d - 260) / 640));
+  const wide = Math.max(0, Math.min(1, (d - 320) / 780));
   const s = 1 + (k - 1) * wide;
   return {
     pos: [
@@ -196,11 +232,20 @@ export function framed(pos: [number, number, number], target: [number, number, n
 }
 
 function cameraFor(c: CampusComponent): { pos: [number, number, number]; target: [number, number, number] } {
-  const span = Math.max(c.size[0], c.size[2]) * 0.9 + 40;
+  /* Instanced components get framed on their whole extent, not one instance. */
+  const span = (c.offsets ? Math.max(c.size[0], c.size[2], instanceSpan(c)) : Math.max(c.size[0], c.size[2])) * 0.9 + 40;
   return {
     pos: [c.pos[0] + span * 0.7, c.pos[1] + span * 0.75 + 20, c.pos[2] + span * 0.9],
     target: [c.pos[0], c.pos[1] + c.size[1] * 0.4, c.pos[2]],
   };
+}
+
+/** How far an instanced component's repeats reach from its origin. */
+function instanceSpan(c: CampusComponent): number {
+  if (!c.offsets?.length) return 0;
+  let max = 0;
+  for (const [dx, dz] of c.offsets) max = Math.max(max, Math.abs(dx) + c.size[0], Math.abs(dz) + c.size[2]);
+  return max;
 }
 
 /* ------------------------------------------------------- construction state */
@@ -208,39 +253,23 @@ function cameraFor(c: CampusComponent): { pos: [number, number, number]; target:
 export type BuildState = 'hidden' | 'building' | 'complete';
 
 /**
- * Phased delivery: later modules lag the first one, but the lag is applied
- * proportionally rather than as a flat offset. A flat offset would push module
- * three's fitout past the end of the programme, which would mean the campus
- * never actually completes.
- */
-/**
- * The one and only module-lag model.
+ * Build state comes straight from each component's own planned window.
  *
- * Later modules lag module 1, but the lag is proportional to the phase rather
- * than a flat offset. A flat offset would push module 3's fitout past the end of
- * the programme and the campus would never complete.
+ * The previous model carried a separate module-lag table that shifted every
+ * component's dates. That was necessary when all buildings shared one phase
+ * list, and it was the single largest source of drift risk in the file. Clonee
+ * is delivered in genuinely different phases, so the plan is written per
+ * component instead: CLN1's shell, CLN2's fit-out and CLN6's fit-out each carry
+ * their own real window, and there is no second timeline to keep in step.
  *
- * Everything that needs to know when a module is live derives from
- * modulePhaseOffset() - the construction panel, the HUD and the 3D build state
- * all call the same function, so there is no second timeline model to drift.
+ * One consequence is worth stating: the modelled AI retrofit components sit
+ * outside the programme entirely, so they only appear at their own phase and
+ * the construction scrub genuinely shows a hall changing over time.
  */
-const MODULE_SHIFT: Record<number, number> = { 1: 0, 2: 4, 3: 8 };
-const LAST_PHASE = PHASES.length - 1;
-
-export function modulePhaseOffset(moduleId: number | undefined): number {
-  return (moduleId ? MODULE_SHIFT[moduleId] ?? 0 : 0);
-}
-
-/** Apply the module lag to a planned phase index. */
-export function laggedPhase(phase: number, moduleId?: number): number {
-  const shift = modulePhaseOffset(moduleId);
-  if (!shift) return phase;
-  return Math.min(LAST_PHASE, phase + Math.round((shift * phase) / LAST_PHASE));
-}
-
 export function buildStateOf(c: CampusComponent, phase: number): { state: BuildState; progress: number } {
-  const s = laggedPhase(c.build[0], c.module);
-  const e = laggedPhase(c.build[1], c.module);
+  const s = c.build[0];
+  const e = c.build[1];
+
   if (c.temporary) {
     if (phase < s || phase > e + 1) return { state: 'hidden', progress: 0 };
     return { state: 'complete', progress: 1 };
@@ -251,42 +280,68 @@ export function buildStateOf(c: CampusComponent, phase: number): { state: BuildS
   return { state: 'building', progress: Math.max(0.15, (phase - s + 1) / Math.max(1, e - s + 1)) };
 }
 
-/* -------------------------------------------------------- module readiness */
+/* -------------------------------------------------------- building readiness */
 
-export interface ModuleReadiness {
-  module: number;
-  /** lagged phase at which the module's white space is energised */
+export interface BuildingReadiness {
+  /** campus reading index 1..5 */
+  index: number;
+  /** the published building name, which is not a simple sequence */
+  name: string;
+  itMW: number;
+  /** phase at which the shell is complete */
+  shellPhase: number;
+  /** phase at which the last hall in the building is carrying IT load */
   fitoutPhase: number;
-  /** lagged phase at which its last turnover package completes */
-  readyPhase: number;
+  /** phase at which the building is handed to operations */
+  handoverPhase: number;
+  /** carries IT load */
   live: boolean;
+  /** handed to operations */
   handedOver: boolean;
   componentsComplete: number;
   componentsTotal: number;
+  /** components whose planned window has already closed by this phase */
+  componentsInProgress: number;
 }
 
-/** Planned phases that mean "carries IT load" and "operational handover". */
-const FITOUT_GATE = 29; // racks and IT equipment installed
-const HANDOVER_GATE = 35; // operational handover
-
-export function moduleReadiness(moduleId: number, phase: number, components: CampusComponent[]): ModuleReadiness {
-  const fitoutPhase = laggedPhase(FITOUT_GATE, moduleId);
-  const readyPhase = laggedPhase(HANDOVER_GATE, moduleId);
-  const mine = components.filter((c) => c.module === moduleId);
+/**
+ * Readiness is derived from the real plan rather than a gate constant.
+ *
+ * The previous model compared a phase index against a hardcoded gate number,
+ * which meant changing the phase list silently broke the readiness table. Here
+ * every figure comes from the building's own `fitout` and `handover` windows,
+ * so the table is correct for any phase list.
+ */
+export function buildingReadiness(index: number, phase: number, components: CampusComponent[]): BuildingReadiness {
+  const b = BUILDINGS.find((x) => x.n === index) ?? BUILDINGS[0];
+  const mine = components.filter((c) => c.building === index);
   const complete = mine.filter((c) => buildStateOf(c, phase).state === 'complete').length;
+  const inProgress = mine.filter((c) => buildStateOf(c, phase).state === 'building').length;
   return {
-    module: moduleId,
-    fitoutPhase,
-    readyPhase,
-    live: phase >= fitoutPhase,
-    handedOver: phase >= readyPhase,
+    index,
+    name: b.name,
+    itMW: b.itMW,
+    shellPhase: b.shell[1],
+    fitoutPhase: b.fitout[1],
+    handoverPhase: b.handover,
+    live: phase >= b.fitout[1],
+    handedOver: phase >= b.handover,
     componentsComplete: complete,
     componentsTotal: mine.length,
+    componentsInProgress: inProgress,
   };
 }
 
-export function modulesReady(phase: number, components: CampusComponent[]): ModuleReadiness[] {
-  return [1, 2, 3].map((m) => moduleReadiness(m, phase, components));
+/** All five buildings, in campus reading order. */
+export function buildingsReady(phase: number, components: CampusComponent[]): BuildingReadiness[] {
+  return BUILDINGS.map((b) => buildingReadiness(b.n, phase, components));
+}
+
+/** Total IT load the campus is carrying at this phase. */
+export function liveItMW(phase: number) {
+  return buildingsReady(phase, COMPONENTS)
+    .filter((r) => r.live)
+    .reduce((a, r) => a + r.itMW, 0);
 }
 
 /* ------------------------------------------------------ commissioning state */
@@ -343,9 +398,8 @@ export function blockersForPackage(state: Record<string, string[]>, pkgId: strin
   if (next) {
     const stage = CX_STAGES.find((s) => s.id === next);
     /* Only prerequisites that fall INSIDE this turnover boundary can block it.
-       Programme-level prerequisites outside the boundary (for example factory
-       testing of bought-in equipment that is commissioned elsewhere) are carried
-       by the `requires` edges instead. */
+       Programme-level prerequisites outside the boundary are carried by the
+       `requires` edges instead. */
     const inBoundary = new Set(pkg.stages);
     const missing = (stage?.needs ?? []).filter((n) => inBoundary.has(n) && !done.includes(n));
     for (const m of missing) {
@@ -419,6 +473,7 @@ export function canStartStage(stageId: string, done: string[]): boolean {
   return stage.needs.every((n) => done.includes(n));
 }
 
+/** Which system each mode foregrounds, for dimming the scene and picking flows. */
 export const SYSTEM_FOR_MODE: Record<Mode, SystemKey | null> = {
   overview: null,
   power: 'power',
@@ -428,4 +483,6 @@ export const SYSTEM_FOR_MODE: Record<Mode, SystemKey | null> = {
   resilience: 'power',
   construction: null,
   commissioning: null,
+  controls: null,
+  ai: 'cooling',
 };

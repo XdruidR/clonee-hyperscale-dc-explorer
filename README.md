@@ -1,368 +1,178 @@
-# Hyperscale Data Centre Explorer
+# Clonee Hyperscale Data Centre Explorer
 
-An interactive 3D technical learning environment for understanding how a modern hyperscale / AI data centre
-works — spatially and technically — and how one is built, commissioned and put into service.
+An interactive 3D learning environment for the Meta data centre campus at Clonee,
+County Meath, Ireland.
 
-It is built for someone who works around major infrastructure and project controls but is not a data centre
-engineer. The goal is that after using it you can walk into a hyperscale data centre project meeting and
-follow what people mean by the GXP, electrical trains, data halls, cooling plant, water, racks,
-commissioning and dependencies.
+The Clonee campus is a real, operating, publicly documented hyperscale project:
+five data-storage buildings named CLN1, CLN2, CLN3, CLN5 and CLN6 (there is no
+CLN4, and the application preserves that gap), twenty data halls, ninety diesel
+generators, and a dedicated customer-built 220 kV substation that EirGrid records
+as the first of its kind in Ireland.
+
+This application reconstructs that campus as a teaching model. It is not a
+digital twin and it is not a design. Every claim it makes carries its own
+provenance, and the boundary of the public record is a visible part of the
+product rather than a disclaimer buried in it.
+
+---
+
+## The one rule
+
+Four classifications, applied to every statement in the model:
+
+| Label | Meaning |
+|---|---|
+| **PUBLIC FACT** | Stated in publicly available documentation for the Clonee project, with a cited source. |
+| **DERIVED** | Arithmetic on published inputs, or deliberately simplified so the model can be rendered. The arithmetic is shown. |
+| **TYPICAL** | Accepted hyperscale design practice from industry material. Not a statement about Clonee. |
+| **SYNTHETIC** | Invented, to demonstrate a delivery or project-controls concept. Never a project fact. |
+
+The classification is available on labels, on component claims and in the fact
+register. It is never obstructive — a reader is never made to read a disclaimer
+before they can use the model.
+
+---
+
+## Modes
+
+| Mode | What it does |
+|---|---|
+| **Campus** | The five-building campus, the capacity figures that disagree, and how to read the model. |
+| **Power** | Electricity from the 220 kV loop-in to a rack, with a scripted utility-loss sequence. |
+| **Cooling** | Heat from the IT equipment to ambient, through an indirectly air-cooled plant. |
+| **Water** | Where cooling and site water enters, circulates and leaves, and why a wet country holds a discharge licence. |
+| **Data** | External fibre to the servers, through the meet-me rooms and the campus core. |
+| **Resilience** | Inject failures and watch the response, including the transformer N-1 case. |
+| **Construction** | Build the campus through 25 phases anchored to real dates, from 2015 consent to the mature campus. |
+| **Commissioning** | Turnover packages with real dependency blocking, from factory testing to handover. |
+| **Project Controls** | WBS, budget, earned value, risks, changes and milestones on a data-date scrub. |
+| **AI Evolution** | Convert a delivered hall to rack-scale liquid-cooled compute, and find out what actually stops you. |
+
+Eight guided journeys run along the bottom of the screen, each moving the camera
+and lighting only what matters at that step.
+
+---
+
+## What the model is good for
+
+**The 15-month grid connection.** EirGrid records the Clonee 220 kV station as
+completed in August 2017, built by the customer and connected in approximately 15
+months — the first customer-built 220 kV station in Ireland. The planning
+consent for it describes a compound of roughly 30,100 m² with 12 × 220 kV bays,
+three step-down transformers, 27 lightning masts, two new transmission towers and
+a loop-in connection. It is the best-documented part of the site and the hardest
+part of any hyperscale programme.
+
+**The capacity figures that disagree.** 36 MW per building from the consent, 180
+MW summed across five buildings, 168 MW from the published IT area and power
+density, 108 MVA from the design record, nearly 150,000 m² of floor area, and 219
+MW in the operator's current material. The application carries all of them, states
+what each one means and what it does not, and does not average them away.
+
+**The water licence in one of Europe's wettest countries.** The project is
+indirectly air cooled, which is by definition air-side — and the environmental
+licence records residual evaporative cooling-water discharge. Both are true. The
+resolution is the Irish climate: almost no cooling degree days, so outside-air
+economisers carry most of the year and the evaporative stage assists only in the
+hottest hours. The licence exists for those hours.
+
+**Building beside a running data centre.** Phase 1 energised the grid in August
+2017 and completed in the final quarter of the same year; CLN2 was handed over in
+May 2018 while CLN3 was already on site; CLN5 and CLN6 were built beside two
+operating buildings. Live-site interfaces are programme logic with outage windows
+attached, not site notes.
+
+**The retrofit nobody expects.** The AI Evolution mode's finding is that
+converting a delivered hall to modern rack-scale compute is constrained by
+electricity and not by floor area. The existing IT floor area could physically
+hold roughly 30,000 rack positions, while the campus supply can fund about 1,300
+at modern density. The order of constraints is electricity, then cooling
+architecture, then structural floor loading, and only then space.
+
+---
+
+## What the model will not claim
+
+- It does not assert a redundancy rating. TIA-942 terminology is used to explain
+  the vocabulary; no rating is claimed for Clonee.
+- It does not present generator ratings, transformer ratings, switchgear lineups,
+  UPS autonomy, cooling plant counts or achieved performance as published.
+- It does not claim the project-controls data is historical. It is generated from
+  published cost and workforce anchors and labelled synthetic throughout.
+- It does not reproduce any operator's detailed design. Where the public record
+  stops at "cooling plant" or "switchgear", the model shows one credible
+  implementation and says so.
+
+Construction phase 24 is called "What the record does not say" and lists the
+gaps. Every component carries a `publicLimit` sentence naming what is not public
+for it.
+
+---
+
+## Documentation
+
+- **[CLONEE_RESEARCH.md](CLONEE_RESEARCH.md)** — the source register, the main
+  project facts, the phase history, the electrical architecture, cooling, civil
+  systems, building data, environmental information, and an explicit list of
+  unknowns and assumptions.
+- **[MODEL_DECISIONS.md](MODEL_DECISIONS.md)** — why each major modelling
+  decision was made, what was rejected, and what it costs.
+- **[PRODUCT.md](PRODUCT.md)** — the product record: audience, purpose,
+  positioning, capabilities and constraints.
+
+## Sources
+
+The primary sources are Meath County Council ePlanning (RA150605, RA180671), An
+Bord Pleanála (VA0018), the EirGrid Annual Report 2017, EPA Industrial Emissions
+Licence P1192-01, Meta's own data-centre announcements, the studioNWA project
+record, the Irish Construction Excellence Awards, and John Paul Construction's
+substation package record. Industry and standards sources are used only for
+typical practice and are labelled as such. The full register with URLs is in the
+application under **Sources & method**, and in
+`src/data/sources.ts`.
+
+---
+
+## Running it
 
 ```bash
 npm install
-npm run dev          # http://localhost:5173
+npm run dev        # development server
+npm run build      # production build to dist/
+npm run preview    # serve the production build
+npm run typecheck  # TypeScript, no emit
+npm run selftest   # data-model integrity checks
 ```
 
-### Reaching it from your tailnet
+The build is static: no backend, no runtime configuration, nothing to host beyond
+files. It is published by the GitHub Actions workflow in `.github/workflows/` when
+Pages is enabled for the repository.
 
-Both servers bind `0.0.0.0`, so any device on your tailnet can load it once it is running. This machine is
-`minter-T460`, tailnet short name `t460`, MagicDNS name `t460.taila598b7.ts.net`, tailnet IP `100.80.3.57`.
+## Verification
 
-| Server | Command | URLs that work |
-| --- | --- | --- |
-| Dev (hot reload) | `npm run dev` | `http://100.80.3.57:5173/` · `http://t460:5173/` · `http://t460.taila598b7.ts.net:5173/` · LAN: `http://192.168.1.8:5173/` |
-| Production preview | `npm run build && npm run preview` | same four, on port **4173** |
-
-Use the **tailnet** addresses from a device that is genuinely on the tailnet. A phone on the same Wi-Fi should
-use the LAN address; `100.80.3.57` only routes over the tailnet.
-
-Both are plain static HTTP, so no TLS or proxy is needed — the tailnet already encrypts the transport.
-
-Three things in `vite.config.ts` make this work, each of which otherwise fails in a way that looks like "the
-server is down":
-
-- **`host: '0.0.0.0'`** — otherwise Vite listens on loopback only.
-- **`allowedHosts`** — Vite answers `403 Blocked request. This host ("t460") is not allowed.` for any unlisted
-  `Host` header. That happens with the tailnet *short* name even though the FQDN works, because a leading-dot
-  entry like `.ts.net` only matches subdomains. The list therefore covers loopback, every local address, the OS
-  hostname, `.ts.net`, `.local`, and single-label names via a regular expression. Public FQDNs are still
-  rejected, which keeps the DNS-rebinding protection intact. If you rename the node, add it to the list, or set
-  `TAILSCALE_ALLOWED_HOSTS=all npm run dev` to disable the check entirely.
-- **`strictPort`** — stops Vite quietly moving to 5174 when the port is busy, which would invalidate a bookmark
-  on your phone. It fails loudly instead.
-
-If a device still cannot load it, check in this order on that device:
-
-1. `tailscale status` — is Tailscale actually connected there?
-2. `tailscale ping t460` — does the tailnet path reach this node?
-3. `curl -sv http://100.80.3.57:5173/` — `403 Blocked request` means the host allow-list;
-   `Connection refused` means nothing is listening; a hang means an ACL or firewall drop.
-
-Note that `firewalld` is inactive on this host and `ufw`/`iptables` could not be inspected without a sudo
-password. If a connection hangs rather than being refused, check your tailnet ACL permits TCP 5173/4173 to this
-node, and `sudo ufw allow 5173/tcp` if `ufw` is active.
-
-Other commands:
+The self test is the data model's contract. It checks that every geometry type has
+a metadata entry, that every fact citation resolves against the source register,
+that the flow graph reaches what it claims to reach, that commissioning packages
+block correctly on their upstream dependencies, that the construction timeline is
+single-sourced, that the derived arithmetic agrees with the published figures, and
+that the campus geometry fits inside the consented site area.
 
 ```bash
-npm run build        # typecheck + production bundle into dist/
-npm run preview      # serve the production bundle
-npm run selftest     # data-model integrity checks (2,600+ assertions)
-npm run smoke        # drive the real app in headless Chrome and screenshot it
+npm run typecheck && npm run selftest && npm run build
 ```
 
-Requires Node 20+ and a WebGL-capable browser. No accounts, no keys, no network calls, no external assets —
-all geometry is generated in code.
-
----
-
-## The one idea that shapes the whole application
-
-Public planning and consent material for large Southland hyperscale data centre projects is unusually detailed
-about **scale, interfaces and quantities** — and almost silent about **detailed design**. So the application
-separates two things at all times:
-
-| Label | Meaning |
-| --- | --- |
-| **PUBLIC FACT** | Explicitly supported by public documentation for the Southland reference project. Cited by source id. |
-| **TYPICAL** | A normal hyperscale / AI data centre design assumption from industry material. Not a statement about any project. |
-| **SIMPLIFIED** | Deliberately simplified or modelled for teaching. |
-| **SYNTHETIC** | Invented placeholder for a delivery concept (WBS codes, cost bands, durations). Never a project fact. |
-
-Turn on **evidence mode** in the toolbar to see the label attached to every 3D label. Open
-**Sources & method** for the full classification rule, the fact register and the source list.
-
-Where the public record stops at "cooling plant", "switchgear", "generators" or "GXP", the inspector says so
-explicitly — *"What is public: … NOT PUBLIC: transformer ratings, count, or connection scheme"* — and then
-shows one typical implementation. It never presents a typical arrangement as fact.
-
-The project is a **fictional generic Southland hyperscale campus**. No company, client, contractor or designer
-name appears anywhere in the interface, in component names, in the geometry or in the data model. Project names
-appear only in the source register, where a provenance record has to identify documents accurately.
-
----
-
-## What is in it
-
-### Modes (top bar)
-
-**Overview** — the whole campus, with the public headline numbers and an explanation of why several different
-capacity figures circulate for the same project (IT capacity vs total demand vs generator rating vs plan value)
-without pretending the public record reconciles them.
-
-**Power** — animated flow from transmission to accelerator. Every stage is clickable and gives what it is, why
-it exists, the voltage / energy transformation concept, failure modes, redundancy, and upstream/downstream
-dependencies. Includes an animated utility-failure sequence: normal supply → utility lost → UPS on battery →
-generators start → stabilise and synchronise → load transferred → mechanical plant restarted → utility restored
-→ back to standby. Each step carries a teaching note.
-
-**Cooling** — heat followed from the die to the atmosphere. HOT / COLD / SUPPLY / RETURN are distinguished on
-the flows. The panel states exactly what the public documents say (water-glycol cold plates carrying 70-80% of
-the heat, secondary liquid heat exchanger for the remaining air heat, evaporative cooling to 15-20 °C,
-disinfection against legionella/algae/scale) and lists the common alternative arrangements as clearly labelled
-TYPICAL: liquid-to-liquid versus liquid-to-air, in-rack vs in-row vs facility-level CDUs, warm-water operation
-and the dew-point rule.
-
-**Water** — a water balance rather than blue pipes: where water enters (roof and hardstand capture, bore field),
-where it goes (evaporation, blowdown, treated recharge), what the storage buys, and the domestic stream for
-comparison. Stormwater is presented as a consent obligation, not a drain.
-
-**Data / network** — fibre from the sea bed to a top-of-rack switch, with the compute / storage / networking
-distinction and what actually happens when an AI workload arrives.
-
-**Resilience** — deliberately fail the grid, a transformer, a UPS path, a generator, a cooling pump, a cooling
-unit or a fibre route, and see the modelled consequence plus the evidence caveat. Includes the N / N+1 / 2N /
-2(N+1) vocabulary, concurrent maintainability, fault domains and common-mode failure, each with the question you
-would ask in a real design review, plus the emergency load-shed order.
-
-**Construction** — a 36-phase slider from an empty paddock to operational handover. Geometry appears
-progressively, temporary works appear and disappear (site sheds, sediment ponds, haul route, dewatering, tower
-cranes), and modules are deliberately offset from each other so you can see phased delivery rather than one
-simultaneous build. A hall is a fault domain and a delivery module at the same time.
-
-**Commissioning** — a 15-stage programme from design verification to handover, with dependencies computed from
-the same graph the flows are drawn from. Try to commission a rack and it tells you which upstream item has not
-finished. Includes the simulated scenarios: pull the utility, fail a generator, fail a pump, lose a path.
-
-### On a phone
-
-Below 820 px the app switches to a different arrangement rather than squeezing the desktop one: a compact bar with a
-scrollable mode picker, a full-width bottom sheet with one panel in it at a time, and a persistent four-tab bar
-(**Campus / Explain / Inspect / Journeys**). The campus is always visible behind the sheet, view options live in
-their own sheet, and the colour key moved into the Explain sheet so it stops costing a sixth of the screen.
-
-Two things this needed that the desktop layout did not:
-
-- **Aspect-aware framing.** The camera field of view is vertical, so a portrait phone sees roughly half the
-  horizontal extent of a desktop at the same camera position. Wide shots are pulled back by the inverse aspect
-  ratio; close-up shots are tapered, because doubling the distance to a transformer would turn a close-up into a
-  mid-shot and lose the point of the step.
-- **Layering.** The 3D labels are a DOM overlay, so every floating panel sits above them. This was a real bug: the
-  labels painted over the phone sheet until the z-order was fixed. The smoke suite now asserts it.
-
-Tap a component to focus and inspect it — hover is not required anywhere in the phone layout.
-
-### Other controls
-
-- roof off · cutaway · exploded · labels · flow animation
-- isolate any data hall, one electrical train, or one cooling loop
-- colour by system or by work package
-- day / dusk / night
-- **delivery view** — every component's inspector carries both views: a *technical view* ("what does this
-  transformer do?") and a *delivery view* (WBS, package, discipline, live construction status, commissioning
-  status, predecessors, successors, SYNTHETIC cost category, milestone). The **delivery layer** toggle also
-  recolours the campus by work package
-- **Follow the electrons** / **Follow the heat** — camera-led journeys
-- 10 guided journeys along the bottom of the screen; each moves the camera and progressively highlights the
-  relevant components
-- click any component to focus the camera and open the inspector
-
----
-
-## Deploying to GitHub Pages
-
-Yes — the app is a purely static single-page app with no server component, no API calls and no third-party
-runtime requests (no fetch, XHR, WebSocket, beacon or tracking pixel; the only URLs in the bundle are the
-document links in the research appendix, which are rendered as ordinary links). It will run unchanged on
-GitHub Pages at:
-
-```
-https://xdruidr.github.io/hyperscale-dc-explorer/
-```
-
-### The one thing that breaks by default
-
-A GitHub Pages *project* site is served from a subdirectory, not the domain root. With Vite's default
-`base: '/'`, the built `index.html` requests `/assets/index-xxx.js` and every load 404s on a white page.
-`vite.config.ts` therefore derives the base path automatically:
-
-```
-base = BASE_PATH, else '/' + (GITHUB_REPOSITORY's repo name, else package.json name) + '/'
-```
-
-It is applied to `build` and `preview` but **not** to the dev server, so `http://localhost:5173/` still works.
-The repo name is read from `GITHUB_REPOSITORY` in CI and from `package.json` locally, so renaming the repo or
-forking it does not require a code change. Set `BASE_PATH` explicitly to override.
-
-### Enabling it
-
-`.github/workflows/pages.yml` builds and publishes on every push to `main`. It runs the typecheck and the
-data-model self test *before* building, so a broken tree is never published. To turn it on:
-
-**In the GitHub UI** — repo → Settings → Pages → Source: **GitHub Actions** → save. The first push to `main`
-after that publishes the site.
-
-**Or from the CLI** (needs the repo to be public first, see below):
-
-```bash
-gh api --method POST repos/XdruidR/hyperscale-dc-explorer/pages \
-  -f build_type=workflow
-# check status
-gh api repos/XdruidR/hyperscale-dc-explorer/pages
-```
-
-### Visibility — read this before switching the repo public
-
-GitHub Pages project sites are reachable by **anyone on the internet**. Per GitHub's documentation, that is
-true *even if the source repository is private*, where the plan allows private Pages. On GitHub Free the
-repository must be public; on paid plans a private repo can publish, but the published site is still public.
-
-Making this repository public therefore exposes:
-
-- `RESEARCH.md` and `src/data/sources.ts`, which name the real Southland project and its consultants so the
-  provenance is accurate. Those names come from publicly available consent documents, but they would become
-  attributable to your account. Remove or generalise those two files first if that matters to you.
-- `prompt0.txt`, the original brief. Harmless, but you may prefer to delete or gitignore it.
-
-The application itself is already clean: no company names outside the source register, no credentials, no
-proprietary assets.
-
-### Verifying locally before you publish
-
-`npm run preview` now serves the production build at the same subdirectory Pages uses, so it is a faithful
-rehearsal:
-
-```bash
-npm run build
-npm run preview
-# then open http://localhost:4173/hyperscale-dc-explorer/
-```
-
-`npm run smoke` also mounts `dist/` under that subdirectory rather than the server root, so if a future change
-regresses the bundle to root-absolute asset URLs, the browser suite fails instead of the live site going blank.
-
-Nothing is published at the moment: the repository is private, Pages is not enabled, and the workflow's deploy
-steps are gated on a manual dispatch.
-
-If you would rather publish from a branch than from Actions, add an empty `.nojekyll` file at the top level of
-the publishing folder, otherwise GitHub Pages runs the content through Jekyll.
-
-Sizes are a non-issue: the published bundle is ~1.26 MB (359 kB gzipped) against a 1 GB site limit.
-
----
-
-## Architecture
-
-```
-src/
-  data/                  the whole content model, all of it declarative
-    calculations.ts      canonical inputs and every derived quantity, computed once
-    sources.ts           source register (the only place project names appear)
-    facts.ts             public fact register + derived arithmetic, each with sources
-    types.ts             classification, system and package vocabularies
-    componentInfo.ts     per-geometry-type technical + delivery metadata
-    campus.ts            the campus model: components, layout, and the flow graph
-    phases.ts            36-phase construction sequence
-    commissioning.ts     commissioning stages, scenarios, modular delivery notes
-    faults.ts            utility-loss sequence, fault scenarios, redundancy vocabulary
-    water.ts             water balance and capacity-claim reconciliation
-    turnover.ts          turnover packages: commissioning boundaries and dependencies
-    supply.ts            supply-state engine driven by the utility-loss sequence
-    archetypes.ts        rack archetypes, the IT MW -> fabric chain, and the network layers
-    journeys.ts          10 guided journeys with camera and view state per step
-  state/store.ts         zustand store, build-state model, commissioning gating
-  three/                 R3F scene, geometry builders, flow renderer, camera rig
-  ui/                    panels, inspector, journeys, sources drawer
-scripts/
-  selftest.ts            data-model integrity checks
-  smoke.mjs              headless-Chrome end-to-end smoke test with screenshots
-```
-
-Design decisions:
-
-**One model, many views.** Components are records with a geometry type, position, size, instancing offsets,
-construction window and system membership. The 3D view, the animated flows, the delivery layer, the
-commissioning blockers and the resilience scenarios are all derived from that one model, so they cannot drift
-apart.
-
-**The flow graph is the dependency graph.** `FLOW_LINKS` describes how systems connect; the commissioning
-blocker messages and the "isolated train" views are computed from the same edges. That is why "you cannot
-commission this rack yet because upstream M1-W.lv has not completed controls and points-to-point" is a real
-consequence rather than a hard-coded sentence.
-
-**Instanced geometry.** Generators, racks, accelerators, cold plates, switches, PDUs, CDUs and in-row cooling
-are drawn as single instanced meshes (~8,000 rendered instances from ~155 records), so the campus stays
-interactive. Repeated equipment is authored once as offsets.
-
-**Phased delivery with a proportional lag.** Module 2 and 3 lag module 1, but the lag is proportional to the
-phase rather than a flat offset — a flat offset would push module 3's fitout past the end of the programme and
-the campus would never complete. The self test asserts that every hall finishes by handover.
-
-**Sticky import path.** The store's `setMode` also sets a sensible interior view (power, cooling, data and
-resilience modes remove the roof and cut the walls), because those stories are invisible through a closed roof.
-The user can always override with the toggles.
-
-### Correctness rules the model now enforces
-
-Three things that were previously only true in prose are now enforced by the model and checked by the test
-suite:
-
-- **One canonical calculation.** `data/calculations.ts` holds the published inputs and every derived quantity.
-  No panel, narrative string or fact register entry restates a derived number by hand, and a test fails if one
-  appears. Where the model needs an assumption it does not publish (UPS efficiency, auxiliary load, battery
-  energy) it lives in a declared `ASSUMPTIONS` table with its own classification.
-- **Commissioning is asset-specific.** Status belongs to turnover packages with real boundaries and `requires`
-  edges, not to a global stage list. A rack completes only when its own package *and the upstream packages it
-  depends on* are signed off, so "this rack cannot be commissioned because its cooling distribution package has
-  not completed leak detection" is a computed consequence.
-- **Failures change state.** The utility-loss sequence drives a supply-state engine that reports which sources are
-  energised, what is carrying the load, how much UPS energy remains and the priority-ordered shed that runs if
-  generation does not arrive. Generation and the grid are modelled as alternative sources into the same MV /
-  emergency bus, so losing one is an electrical state change rather than a narration.
-
-Also corrected, because both taught the wrong mental model:
-
-- **Generator heat is a separate problem.** About 445 MW of engine heat is rejected through the sets' own
-  radiators, jacket water, aftercoolers and exhaust, straight to ambient. It does not go through the data centre
-  cooling water loop. The model has a distinct generator heat rejection component and a distinct path to the
-  atmosphere, and a test fails if generator heat ever flows into the IT cooling plant.
-- **A spine failure is not automatically harmless.** Losing a spine reduces available east-west capacity unless
-  the fabric was designed with spare capacity, and collective traffic stalls rather than degrading.
-
-### Verification
-
-`npm run selftest` runs about 3,800 assertions. It has two halves: referential integrity, and semantic tests that
-check the meaning of the model.
-
-Referential integrity covers the things that actually break in an app like this: that every component has
-metadata and a valid phase window, that halls do not overlap and match the public footprint figure, that the
-84 generators, 4 towers and 5 bores are where the public record puts them, that every flow link points at real
-components, that every hall is reachable for power, cooling, data and water, that commissioning stages are
-ordered, that a rack is blocked by its upstream equipment, that temporary works appear and disappear, that
-every journey and fault scenario references real components, that every citation resolves, and that the public
-arithmetic (268.8 MW of generation, 445.2 MW of generator heat, ~0.137 m³/MWh of water) is internally consistent,
-and that there is only one module-lag model in the source tree.
-
-The semantic tests assert, among other things: every operational source has an electrical path to its critical
-loads; generator heat never flows into the IT cooling plant; UPS energy decreases while carrying the load on
-battery and recovers on generation; a commissioned rack cannot exist while its power or cooling packages are
-unsigned; every `PUBLIC FACT` statement carries a public source; and no UI narrative restates a derived number
-by hand.
-
-`npm run smoke` builds nothing itself — run `npm run build` first — then serves `dist/`, drives the real
-application in headless Chrome over the DevTools protocol, exercises all eight modes, the construction slider,
-the view toggles, failure injection, the utility-loss animation, commissioning gating, a guided journey, the
-inspector and the sources drawer, and fails on any console error, page exception or failed request. It writes
-screenshots to `smoke-out/`.
-
----
-
-## What this is not
-
-It is not a design, a simulation or a training course with a certificate. It does not reproduce any real
-facility's detailed design, and the geometry is indicative rather than architectural. It deliberately does not
-invent UPS autonomy, generator step-load criteria, recovery times, acceptance criteria or costs, because those
-are project-specific and inventing them would be the most misleading thing it could do.
-
-See `RESEARCH.md` for the research provenance, the confirmed public figures, the known disagreements between
-sources, and the full source list.
+## Stack
+
+React 18, TypeScript, Vite, react-three-fiber, drei, three and zustand. The 3D
+engine, scene architecture, mode system, guided-journey machinery, commissioning
+package model and test suite were ported from
+[`hyperscale-dc-explorer`](https://github.com/XdruidR/hyperscale-dc-explorer),
+which modelled a fictional campus. The project model is new throughout: this is
+not the same model with new labels, because the two campuses differ structurally.
+The reasoning is in [MODEL_DECISIONS.md](MODEL_DECISIONS.md).
+
+## Licence
+
+The source code is provided as-is. The project it depicts is operated by Meta
+Ireland; the facts it uses come from public planning, environmental, grid and
+industry sources, cited individually.

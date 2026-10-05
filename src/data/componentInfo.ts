@@ -8,7 +8,7 @@ import type { ComponentInfo } from './types';
  *   supports the existence and headline parameter of the item.
  * - 'TYPICAL'      -> a normal hyperscale design assumption. Anything the public
  *   record does not describe stays here.
- * - 'SIMPLIFIED'   -> modelled representation only.
+ * - 'DERIVED'   -> modelled representation only.
  * - 'SYNTHETIC'    -> invented delivery placeholder (WBS codes, cost bands,
  *   durations). Never a project fact.
  */
@@ -96,8 +96,8 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     provenance: 'PUBLIC FACT',
     facts: ['towers', 'grid-voltage'],
   },
-  'gxp-platform': {
-    type: 'gxp-platform',
+  'sub-platform': {
+    type: 'sub-platform',
     system: 'power',
     title: 'GXP platform and security enclosure',
     what: 'The gravel/crushed-rock platform, fence and civil works that form the grid exit point compound.',
@@ -126,10 +126,10 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install, CX.press],
     provenance: 'PUBLIC FACT',
-    facts: ['gxp-area'],
+    facts: ['substation-area'],
   },
-  'gxp-transformer': {
-    type: 'gxp-transformer',
+  'sub-transformer': {
+    type: 'sub-transformer',
     system: 'power',
     title: 'GXP power transformer',
     what: 'A large three-phase oil-filled or dry-type transformer that steps transmission voltage down to the campus medium-voltage level.',
@@ -166,8 +166,8 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     publicLimit:
       'PUBLIC: a substation with transformers, switching equipment, control buildings and gantries exists in the north-east corner. NOT PUBLIC: ratings, count, connection scheme, redundancy.',
   },
-  'gxp-bay': {
-    type: 'gxp-bay',
+  'sub-bay': {
+    type: 'sub-bay',
     system: 'power',
     title: 'HV switchyard bay and gantry',
     what: 'The disconnectors, circuit breakers, surge arresters and structures that switch and protect the incoming circuits.',
@@ -197,11 +197,11 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install, CX.elec, CX.energ, CX.func],
     provenance: 'TYPICAL',
-    facts: ['gxp-area'],
+    facts: ['substation-area'],
     publicLimit: 'PUBLIC: switching equipment and gantries exist. NOT PUBLIC: switching scheme, breaker ratings, protection philosophy.',
   },
-  'gxp-control': {
-    type: 'gxp-control',
+  'sub-control': {
+    type: 'sub-control',
     system: 'power',
     title: 'Substation control building',
     what: 'The building housing protection relays, control panels, SCADA gateway, battery DC systems and communications for the substation.',
@@ -224,7 +224,88 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       successors: ['SCADA integration', 'Owner handover'],
     },
     cxStages: [CX.install, CX.ctrl, CX.func, CX.ist],
-    provenance: 'TYPICAL',
+    provenance: 'PUBLIC FACT',
+    publicLimit:
+      'BP-VA0018 confirms a control building in the compound. What is inside it, and how it interfaces with the transmission owner\'s SCADA, is not published.',
+  },
+  'sub-mv-building': {
+    type: 'sub-mv-building',
+    system: 'power',
+    title: 'Customer MV building',
+    what: 'The building that holds the campus medium-voltage distribution on the customer side of the transmission boundary.',
+    why: 'This is where the grid connection stops being the transmission owner\'s problem and becomes the campus\'s. Everything downstream of it — the underground 20 kV network to the buildings, the connection to generation, and every hall feeder — is customer scope, and it is deliberately housed separately from the HV control systems.',
+    technical: [
+      {
+        text: 'PUBLIC FACT: the consented substation compound includes a customer MV building, alongside the control building and the diesel-generator building.',
+        classification: 'PUBLIC FACT',
+        sources: ['BP-VA0018'],
+      },
+      'TYPICAL: an MV lineup in this building is the campus\'s main distribution point, with feeder protection, metering and a defined interface to the transmission owner\'s protection.',
+      'TYPICAL: the diesel-generator building listed in the same consent is separate from the ninety IT diesel generators, and its function is not published.',
+    ],
+    failureModes: [
+      'Loss of the MV lineup takes the whole campus down regardless of the upstream source being healthy',
+      'Protection mis-operation on one feeder trips wider than intended',
+      'Loss of the building\'s own auxiliary supply removes control power',
+    ],
+    redundancy:
+      'Typically two incomers from the step-down transformers with a bus coupler, so one transformer can be out without losing the campus. The N-1 case is the most instructive thing on this site: three transformers at the modelled 90 MVA give 270 MVA, and losing one leaves 180 MVA against a facility draw of about 234 MW.',
+    upstream: 'Step-down transformers in the 220 kV compound',
+    downstream: 'Underground 20 kV cable network to each building MV switchgear',
+    voltage: '20 kV',
+    delivery: {
+      wbs: 'HV-0300',
+      package: 'MV/LV ELECTRICAL',
+      discipline: 'HV / MV electrical',
+      costBand: 'SYNTHETIC — Major',
+      milestone: 'Campus MV commissioned',
+      predecessors: ['Substation transformers', 'Cable routes'],
+      successors: ['Building MV energisation', 'Load bank testing'],
+    },
+    cxStages: [CX.design, CX.factory, CX.install, CX.elec, CX.ctrl, CX.energ, CX.func, CX.fail, CX.ist],
+    provenance: 'PUBLIC FACT',
+    facts: ['substation-area'],
+    publicLimit:
+      'The existence and location of the customer MV building are public. Its contents, the MV voltage arrangement inside it and the protection philosophy are not.',
+  },
+  'hall-floor': {
+    type: 'hall-floor',
+    system: 'site',
+    title: 'Hall white space',
+    what: 'The raised, finished floor inside one data hall, on which the racks, containment and cooling units stand.',
+    why: 'The floor is the constraint that quietly decides everything above it: floor loading sets how heavy a rack may be, the void beneath it decides where cable and pipework can run, and the grid of the floor sets how many rack positions physically fit. It is the reason a retrofit into higher-density compute is an electrical problem before it is a spatial one.',
+    technical: [
+      {
+        text: 'PUBLIC FACT: each data hall is approximately 4,170 m², four per building.',
+        classification: 'PUBLIC FACT',
+        sources: ['MCC-150605', 'SNWA-FB'],
+      },
+      'DERIVED: 720 racks are modelled per hall, which over 9 MW of consented IT load is about 12.5 kW per rack. Nothing about the internal layout is published.',
+      'TYPICAL: floor loading for an air-cooled hall of this period is around 1,500 kg/m². A loaded rack-scale AI system is roughly 2,100 kg/m², which is why floor loading is a binding constraint in a retrofit.',
+    ],
+    failureModes: [
+      'Local point-load failure under concentrated rack weight',
+      'Uneven floor levelness preventing containment sealing and airflow',
+      'Loss of the floor void that cable and pipework depend on',
+    ],
+    redundancy:
+      'None, and it does not need any. The floor is a single continuous surface; its failure mode is local damage rather than loss of the hall.',
+    upstream: 'Building slab and structure',
+    downstream: 'Racks, containment, in-hall cooling, busway, cabling',
+    delivery: {
+      wbs: 'BLD-0400',
+      package: 'BUILDING',
+      discipline: 'Civil / interiors',
+      costBand: 'SYNTHETIC — Moderate',
+      milestone: 'Hall slab complete',
+      predecessors: ['Substructure', 'Frame', 'Envelope'],
+      successors: ['Hall fit-out', 'Containment installation'],
+    },
+    cxStages: [CX.install, CX.press, CX.func, CX.thermal, CX.it],
+    provenance: 'DERIVED',
+    facts: ['hall-size'],
+    publicLimit:
+      'The hall floor area is published. The internal floor construction, the void depth, the floor loading design value and the rack layout are all not published.',
   },
   'mv-switchgear': {
     type: 'mv-switchgear',
@@ -705,8 +786,8 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     publicLimit:
       'PUBLIC: the remaining heat is captured as hot air and cooled via a secondary liquid heat exchanger. NOT PUBLIC: whether CRAH/CRAC units are used, or their type and arrangement.',
   },
-  'adiabatic-cooler': {
-    type: 'adiabatic-cooler',
+  'air-cooler': {
+    type: 'air-cooler',
     system: 'cooling',
     title: 'Adiabatic / evaporative heat rejection unit',
     what: 'An outdoor heat exchanger that cools the circulating water by evaporating water onto a wetted surface as air is drawn through it.',
@@ -893,7 +974,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       successors: ['Operational monitoring'],
     },
     cxStages: [],
-    provenance: 'SIMPLIFIED',
+    provenance: 'DERIVED',
     publicLimit: 'A diagrammatic marker, not an asset. SIMPLIFIED by construction.',
   },
 
@@ -922,7 +1003,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       successors: ['Operational monitoring'],
     },
     cxStages: [CX.thermal],
-    provenance: 'SIMPLIFIED',
+    provenance: 'DERIVED',
     publicLimit:
       'PUBLIC FACT: evaporative heat rejection discharging water vapour, and the visibility of that vapour under some conditions. The plume geometry shown here is SIMPLIFIED and is not a dispersion model.',
   },
@@ -952,34 +1033,6 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install, CX.press, CX.ctrl, CX.func, CX.fail, CX.thermal],
     provenance: 'TYPICAL',
-  },
-  reservoir: {
-    type: 'reservoir',
-    system: 'water',
-    title: 'Underground cooling water storage',
-    what: 'Large sealed water reservoirs built beneath the hall buildings.',
-    why: 'Two reasons: buffering the cooling loop between production and use, and surviving a short loss of water supply. Public documents describe about 75,000 m3 of storage at 1.5-2.0 m below ground level, sealed against groundwater interaction, giving roughly 1.5 months of contingency.',
-    technical: [
-      'Public fact: ~75,000 m3, depth 1.5-2.0 m below ground level, sealed to avoid groundwater interaction; uplift forces are a building-consent issue.',
-      'Storing water under a building saves pumping energy and land area, and makes rainwater capture practical: you can bank a wet winter.',
-      'The design must cope with the water table: a shallow, wide tank under a large slab is a buoyancy problem and a settlement problem.',
-    ],
-    failureModes: ['Leak into the structure or the aquifer', 'Uplift of the slab', 'Water quality degradation (legionella, algae)', 'Sediment and biofilm'],
-    redundancy: 'Storage is inherently a buffer; losing it does not stop the plant immediately, but it removes the safety margin.',
-    upstream: 'Rainwater capture, groundwater bores, stormwater treatment',
-    downstream: 'Cooling plant make-up and the facility water loop',
-    delivery: {
-      wbs: 'SYN-CIV-0300',
-      package: 'CIVIL',
-      discipline: 'Civil / Structural',
-      costBand: 'SYNTHETIC — Large',
-      milestone: 'Reservoirs watertight',
-      predecessors: ['Bulk earthworks', 'Ground improvement', 'Hall slab design'],
-      successors: ['Waterproofing and testing', 'Commissioning fill'],
-    },
-    cxStages: [CX.install, CX.press, CX.func],
-    provenance: 'PUBLIC FACT',
-    facts: ['water-storage'],
   },
   'water-treatment': {
     type: 'water-treatment',
@@ -1019,7 +1072,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     technical: [
       'Public fact: up to 7 L/s (604,800 L/day, 220,752,000 L/yr) from a bore field of four to five production bores.',
       'Public fact: 41 known bores within 3 km, 8 within 1.5 km, nearest neighbour well about 650 m from the site centre; a borefield pumping test is a condition of consent.',
-      'Public fact: groundwater drawdown alone could lower the adjacent wetland by up to 1.4 m over 20 years — the soakage recharge system is the mitigation.',
+      'Public fact: groundwater drawdown alone could lower the adjacent watercourse by up to 1.4 m over 20 years — the soakage recharge system is the mitigation.',
       'Drawdown around neighbouring wells is the classic groundwater-consent fight: it is a consent condition, not a design detail.',
     ],
     failureModes: ['Pump or motor failure', 'Yield decline or sand ingress', 'Water quality change', 'Aquifer depletion under a warming climate', 'Drawdown affecting a neighbour\'s well'],
@@ -1037,7 +1090,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install, CX.ctrl, CX.func],
     provenance: 'PUBLIC FACT',
-    facts: ['groundwater-take', 'wetland'],
+    facts: ['groundwater', 'stormwater'],
   },
   'potable-tank': {
     type: 'potable-tank',
@@ -1099,16 +1152,16 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     system: 'water',
     title: 'Stormwater basin and soakage system',
     what: 'A southern detention basin, swales and a soakage trench that manage the site\'s runoff.',
-    why: 'A 700 m x 700 m campus with buildings and roads sheds water fast. Public documents describe swales both sides of the hall area, an attenuation basin at the southern end with about 24 hours of retention, and a soakage trench that recharges the aquifer to protect the wetland to the south.',
+    why: 'A 700 m x 700 m campus with buildings and roads sheds water fast. Public documents describe swales both sides of the hall area, an attenuation basin at the southern end with about 24 hours of retention, and a soakage trench that recharges the aquifer to protect the watercourse to the south.',
     technical: [
-      'Public fact: expected to remove up to 80% of sediment and 60% of other pollutants; long-term recharge discharge to the wetland around 157,000 m3/yr.',
+      'Public fact: expected to remove up to 80% of sediment and 60% of other pollutants; long-term recharge discharge to the watercourse around 157,000 m3/yr.',
       'Public fact: part of the runoff is captured into the cooling water reservoirs via a weir arrangement, with pretreatment before it reaches the cooling loop.',
-      'The 1% AEP event overtops and follows existing flow paths south to the wetland and stream. Design the failure path as well as the normal path.',
+      'The 1% AEP event overtops and follows existing flow paths south to the watercourse and stream. Design the failure path as well as the normal path.',
     ],
     failureModes: ['Basin overtopping in an extreme event', 'Erosion of swales during construction', 'Sediment carryover into the cooling reservoirs', 'Blockage of soakage trenches'],
     redundancy: 'Not a redundant system; it is a treatment train with a designed overflow path.',
     upstream: 'Roof capture, road sumps, swales',
-    downstream: 'Soakage recharge to the wetland, and the cooling reservoirs',
+    downstream: 'Soakage recharge to the watercourse, and the cooling reservoirs',
     delivery: {
       wbs: 'SYN-CIV-0200',
       package: 'CIVIL',
@@ -1116,39 +1169,39 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       costBand: 'SYNTHETIC — Moderate',
       milestone: 'Stormworks complete',
       predecessors: ['Bulk earthworks', 'Erosion and sediment controls'],
-      successors: ['Soakage trench', 'Wetland monitoring'],
+      successors: ['Soakage trench', 'watercourse monitoring'],
     },
     cxStages: [CX.install, CX.press, CX.func],
     provenance: 'PUBLIC FACT',
     facts: ['stormwater'],
   },
-  wetland: {
-    type: 'wetland',
+  watercourse: {
+    type: 'stormwater',
     system: 'water',
-    title: 'Wetland interface and recharge',
-    what: 'The adjacent wetland, its enhancement and the new wetland created on site.',
-    why: 'The groundwater take and the site works both interact with wetland hydrology. Public documents describe removal of one small low-value wetland (0.24 ha), retention and enhancement of a much larger wetland to the south (~13 ha), and creation of new wetland areas.',
+    title: 'watercourse interface and recharge',
+    what: 'The adjacent watercourse, its enhancement and the new watercourse created on site.',
+    why: 'The groundwater take and the site works both interact with watercourse hydrology. Public documents describe removal of one small low-value watercourse (0.24 ha), retention and enhancement of a much larger watercourse to the south (~13 ha), and creation of new watercourse areas.',
     technical: [
-      'Public fact: without mitigation the take could lower wetland water levels by up to 1.4 m over 20 years; soakage recharge is the agreed mitigation.',
+      'Public fact: without mitigation the take could lower watercourse water levels by up to 1.4 m over 20 years; soakage recharge is the agreed mitigation.',
       'The recharge trench is designed with deep infiltration features and seasonal storage to balance the flows.',
       'This is a consent obligation with monitoring attached, not a landscaping item.',
     ],
     failureModes: ['Groundwater drawdown', 'Sediment or contaminant ingress during construction', 'Failed soakage recharge'],
     redundancy: 'Not applicable. This is a receiving environment obligation.',
     upstream: 'Stormwater basin, soakage trench, groundwater regime',
-    downstream: 'Wetland ecological values, downstream stream',
+    downstream: 'watercourse ecological values, downstream stream',
     delivery: {
       wbs: 'SYN-ENV-0100',
       package: 'CIVIL',
       discipline: 'Environmental',
       costBand: 'SYNTHETIC — Minor (but licence-critical)',
-      milestone: 'Wetland obligations met',
+      milestone: 'watercourse obligations met',
       predecessors: ['Bulk earthworks', 'Erosion and sediment controls', 'Consent conditions'],
-      successors: ['Wetland monitoring programme'],
+      successors: ['watercourse monitoring programme'],
     },
     cxStages: [CX.install, CX.func],
     provenance: 'PUBLIC FACT',
-    facts: ['wetland'],
+    facts: ['stormwater'],
   },
 
   /* ------------------------------------------------------------------ DATA */
@@ -1180,8 +1233,8 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     provenance: 'PUBLIC FACT',
     facts: ['fibre'],
   },
-  'landing-station': {
-    type: 'landing-station',
+  'fibre-hub': {
+    type: 'fibre-hub',
     system: 'data',
     title: 'Cable landing station',
     what: 'The onshore building where submarine cables terminate and are handed to terrestrial networks.',
@@ -1304,8 +1357,8 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     cxStages: [CX.install, CX.elec, CX.ctrl, CX.energ, CX.func, CX.it],
     provenance: 'TYPICAL',
   },
-  'gpu-server': {
-    type: 'gpu-server',
+  'server': {
+    type: 'server',
     system: 'data',
     title: 'Accelerator server (GPU / AI node)',
     what: 'The compute node: CPUs, GPUs, memory, storage, networking and power supplies in one chassis.',
@@ -1394,10 +1447,10 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install, CX.func, CX.thermal],
     provenance: 'PUBLIC FACT',
-    facts: ['halls', 'hall-height'],
+    facts: ['hall-count', 'hall-height'],
   },
-  'module-plant': {
-    type: 'module-plant',
+  'building-plant': {
+    type: 'building-plant',
     system: 'site',
     title: 'Module internal plant zone',
     what: 'The strip inside each module rectangle holding generators, heat rejection, pumps and chemical dosing.',
@@ -1422,7 +1475,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install],
     provenance: 'PUBLIC FACT',
-    facts: ['halls'],
+    facts: ['hall-count'],
   },
   road: {
     type: 'road',
@@ -1450,7 +1503,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install, CX.func],
     provenance: 'PUBLIC FACT',
-    facts: ['earthworks'],
+    facts: ['campus-roads'],
   },
   gatehouse: {
     type: 'gatehouse',
@@ -1503,7 +1556,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     },
     cxStages: [CX.install],
     provenance: 'PUBLIC FACT',
-    facts: ['earthworks'],
+    facts: ['campus-roads'],
   },
   admin: {
     type: 'admin',
@@ -1559,38 +1612,12 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     cxStages: [],
     provenance: 'PUBLIC FACT',
   },
-  dewatering: {
-    type: 'dewatering',
-    system: 'site',
-    title: 'Dewatering (temporary)',
-    what: 'Pumping groundwater to lower the water table inside the excavation.',
-    why: 'Public fact: excavation reaches 5 m below ground level and dewatering was consented at up to 60 L/s for up to two months, with treated discharge to land.',
-    technical: [
-      'Displacement of groundwater can cause ground settlement well beyond the excavation, which is why a ground settlement management plan and monitoring are required.',
-      'Treated discharge has to go somewhere safe: publicly it was treated and discharged to land draining to the wetlands to the south.',
-    ],
-    failureModes: ['Sump failure flooding the excavation', 'Untreated discharge carrying sediment', 'Settlement damage beyond the site'],
-    redundancy: 'Not applicable; mitigated by monitoring and staged excavation.',
-    upstream: 'Consent conditions, settlement monitoring',
-    downstream: 'Excavation and earthworks',
-    delivery: {
-      wbs: 'SYN-CIV-0120',
-      package: 'CIVIL',
-      discipline: 'Civil / Environmental',
-      costBand: 'SYNTHETIC — Moderate',
-      milestone: 'Excavation below groundwater safe',
-      predecessors: ['Bulk earthworks started', 'Settlement monitoring baseline'],
-      successors: ['Foundations', 'Slabs'],
-    },
-    cxStages: [],
-    provenance: 'PUBLIC FACT',
-  },
   'sediment-pond': {
     type: 'sediment-pond',
     system: 'water',
     title: 'Sediment controls (temporary)',
     what: 'Ponds, bunds, inlet controls and stockpile management during earthworks.',
-    why: 'A certified erosion and sediment control plan is a condition of doing the work. On this site the receiving environment to the south is a high-value wetland.',
+    why: 'A certified erosion and sediment control plan is a condition of doing the work. On this site the receiving environment to the south is a high-value watercourse.',
     technical: [
       'Typical sequence: stockpile tops sealed, perimeter diversion bunds, sediment ponds sized for the site area, wheel wash, daily inspections during rain.',
       'These works appear before earthworks and stay until the site is stabilised, which is exactly how you spot them on a real project photograph.',
@@ -1635,7 +1662,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       successors: ['Weather-tight milestone'],
     },
     cxStages: [],
-    provenance: 'SIMPLIFIED',
+    provenance: 'DERIVED',
   },
   'temp-road': {
     type: 'temp-road',
@@ -1661,7 +1688,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       successors: ['Permanent roads'],
     },
     cxStages: [],
-    provenance: 'SIMPLIFIED',
+    provenance: 'DERIVED',
   },
 
   fire: {

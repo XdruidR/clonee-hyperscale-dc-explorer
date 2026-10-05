@@ -12,7 +12,6 @@ export const MEDIUM_STYLE: Record<FlowMedium, { color: string; width: number; sp
   lv: { color: '#ffe9a3', width: 2.2, speed: 18, dash: 7, gap: 4 },
   rack: { color: '#fff6d5', width: 1.7, speed: 16, dash: 5, gap: 3 },
   coolant: { color: '#ff7a5b', width: 2.1, speed: 14, dash: 7, gap: 4 },
-  chilled: { color: '#ff9d8a', width: 1.9, speed: 13, dash: 6, gap: 3.5 },
   water: { color: '#38bdf8', width: 2.1, speed: 12, dash: 8, gap: 4 },
   makeup: { color: '#7dd3fc', width: 1.7, speed: 11, dash: 7, gap: 4 },
   drain: { color: '#1d4ed8', width: 1.7, speed: 10, dash: 7, gap: 4 },
@@ -54,6 +53,10 @@ function systemsForMode(mode: Mode): Set<string> {
       return new Set(['data']);
     case 'resilience':
       return new Set(['power', 'cooling']);
+    /* The AI comparison is about the heat path, so it shows cooling and power:
+       the whole finding is that the power train is what stops you. */
+    case 'ai':
+      return new Set(['cooling', 'power']);
     case 'overview':
       return new Set(['power', 'cooling', 'water', 'data']);
     default:

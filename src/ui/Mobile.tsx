@@ -1,19 +1,26 @@
 import { useStore, type Mode } from '../state/store';
 import { JOURNEYS } from '../data/journeys';
 import { SYSTEM_META } from '../data/types';
+import { BUILDINGS } from '../data/campus';
+import { derived, fmt, fmtInt } from '../data/calculations';
+import { HOME_CAMERA } from '../state/store';
 
 /**
  * Phone layout.
  *
- * The desktop arrangement - two fixed side panels plus a wide toolbar and a
- * journey strip - does not survive a 412 px viewport, and squeezing it produces
+ * The desktop arrangement — two fixed side panels plus a wide toolbar and a
+ * journey strip — does not survive a 390 px viewport, and squeezing it produces
  * something worse than useless. Instead: one full-width sheet at a time with a
- * persistent tab bar, a compact toolbar with a mode picker, and the 3D view
- * always visible behind it.
+ * persistent tab bar, a compact toolbar with a wrapping mode picker, and the 3D
+ * view always visible behind it.
+ *
+ * No pictographs are used anywhere in this file. The tab bar marks its state
+ * with a drawn rule and a label rather than with a glyph, because a unicode
+ * symbol standing in for an icon is a costume rather than an interface.
  */
 
 const MODES: { id: Mode; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
+  { id: 'overview', label: 'Campus' },
   { id: 'power', label: 'Power' },
   { id: 'cooling', label: 'Cooling' },
   { id: 'water', label: 'Water' },
@@ -21,6 +28,8 @@ const MODES: { id: Mode; label: string }[] = [
   { id: 'resilience', label: 'Resilience' },
   { id: 'construction', label: 'Construction' },
   { id: 'commissioning', label: 'Commissioning' },
+  { id: 'controls', label: 'Controls' },
+  { id: 'ai', label: 'AI' },
 ];
 
 export function MobileTopBar({ onSources }: { onSources: () => void }) {
@@ -33,22 +42,22 @@ export function MobileTopBar({ onSources }: { onSources: () => void }) {
   return (
     <div className="m-topbar">
       <div className="m-brand">
-        Hyperscale Data Centre Explorer
-        <span>educational model</span>
+        Clonee Hyperscale Data Centre Explorer
+        <span>Meta, Co. Meath · public record and typical practice</span>
       </div>
       <div className="m-topbar-actions">
-        <button onClick={() => moveCamera([560, 430, 640], [-40, 0, 20])} title="Frame the whole campus">
-          ⤢
+        <button onClick={() => moveCamera(HOME_CAMERA.pos, HOME_CAMERA.target)} title="Frame the whole campus">
+          Campus view
         </button>
         <button onClick={onSources} title="Sources and method">
-          ⓘ
+          Sources
         </button>
         <button
           onClick={() => setSheet(sheet === 'view' ? null : 'view')}
           className={sheet === 'view' ? 'active' : ''}
           title="View options"
         >
-          ☰
+          View
         </button>
       </div>
       <div className="m-modepicker">
@@ -74,11 +83,11 @@ export function MobileTabBar() {
   const setSheet = useStore((s) => s.setSheet);
   const selected = useStore((s) => s.selected);
 
-  const tabs: { id: 'mode' | 'inspect' | 'learn' | null; label: string; glyph: string; disabled?: boolean }[] = [
-    { id: null, label: 'Campus', glyph: '⬒' },
-    { id: 'mode', label: 'Explain', glyph: '≡' },
-    { id: 'inspect', label: 'Inspect', glyph: 'ⓘ', disabled: !selected },
-    { id: 'learn', label: 'Journeys', glyph: '▷' },
+  const tabs: { id: 'mode' | 'inspect' | 'learn' | null; label: string; disabled?: boolean }[] = [
+    { id: null, label: 'Campus' },
+    { id: 'mode', label: 'Explain' },
+    { id: 'inspect', label: 'Inspect', disabled: !selected },
+    { id: 'learn', label: 'Journeys' },
   ];
 
   return (
@@ -91,8 +100,9 @@ export function MobileTabBar() {
             className={on ? 'active' : ''}
             disabled={t.disabled}
             onClick={() => setSheet(on ? null : t.id)}
+            aria-current={on ? 'page' : undefined}
           >
-            <span className="glyph">{t.glyph}</span>
+            <span className="m-tabbar-rule" aria-hidden="true" />
             <span>{t.label}</span>
           </button>
         );
@@ -103,14 +113,13 @@ export function MobileTabBar() {
 
 export function MobileLearnSheet() {
   const startJourney = useStore((s) => s.startJourney);
-  const sheet = useStore((s) => s.sheet);
   const setSheet = useStore((s) => s.setSheet);
 
   return (
     <div>
       <p className="lede">
-        Guided journeys move the camera and step through the explanation. Best with the sheet closed, so you can see
-        the campus.
+        A journey moves the camera and steps through the explanation. Close the sheet as it starts, so you can see the
+        campus.
       </p>
       {JOURNEYS.map((j) => (
         <button
@@ -121,33 +130,44 @@ export function MobileLearnSheet() {
             setSheet(null);
           }}
         >
-          <span>▷</span>
-          <span>
-            {j.title}
-            <div className="tiny">{j.blurb}</div>
+          <span className="glyph" aria-hidden="true" />
+          <span className="body">
+            <b>{j.title}</b>
+            <span>{j.blurb}</span>
           </span>
-          <span className="tiny">{j.steps.length} steps</span>
+          <span className="num">{j.steps.length} steps</span>
         </button>
       ))}
-      <div className="tiny" style={{ marginTop: 8 }}>
-        {sheet === 'learn' ? 'Tap a journey to start. The campus button returns to the 3D view.' : ''}
-      </div>
     </div>
   );
 }
 
 /**
  * The colour key lives at the top of the explain sheet rather than floating over
- * the campus: on a 412px viewport a floating legend costs a sixth of the screen
+ * the campus: on a phone viewport a floating legend costs a sixth of the screen
  * and obscures the thing it explains.
+ *
+ * It carries the campus figures as well, because on a phone the campus panel is
+ * the first thing read and the numbers are the fastest route into it.
  */
 export function MobileLegend() {
   return (
     <div className="m-legend-inline">
-      {Object.values(SYSTEM_META).map((s) => (
-        <span key={s.label} className="legend-row">
-          <span className="swatch" style={{ background: s.color }} />
-          {s.label}
+      <div className="m-legend-figures">
+        <span className="legend-row">
+          <b>{fmt(derived.itCapacityMW, 0)} MW</b> IT across {BUILDINGS.length} buildings
+        </span>
+        <span className="legend-row">
+          <b>{fmtInt(derived.hallCount)}</b> data halls
+        </span>
+        <span className="legend-row">
+          <b>90</b> diesel generators
+        </span>
+      </div>
+      {(['power', 'cooling', 'water', 'data', 'site'] as const).map((k) => (
+        <span key={k} className="legend-row">
+          <span className="swatch" style={{ background: SYSTEM_META[k].color }} />
+          {SYSTEM_META[k].label.toLowerCase()}
         </span>
       ))}
     </div>

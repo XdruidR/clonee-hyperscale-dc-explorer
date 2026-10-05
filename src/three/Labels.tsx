@@ -1,8 +1,16 @@
 import { Html } from '@react-three/drei';
-import type { CampusComponent } from '../data/campus';
+import { BUILDING_BY_NAME, HALL_NAME, type CampusComponent } from '../data/campus';
 import { COMPONENT_INFO } from '../data/componentInfo';
 import { CLASSIFICATION_COLORS } from '../data/facts';
 import { useStore } from '../state/store';
+
+/** Short form of a classification, for the width a 3D label can afford. */
+const SHORT_CLS: Record<string, string> = {
+  'PUBLIC FACT': 'FACT',
+  DERIVED: 'DER',
+  TYPICAL: 'TYP',
+  SYNTHETIC: 'SYN',
+};
 
 /** Small 3D label. Uses a short title rather than the full component name so the
  *  campus stays readable; the inspector carries the full name. */
@@ -19,7 +27,7 @@ export function Label({ c, dim, y }: { c: CampusComponent; dim: number; y: numbe
         <span className="w3d-label-text">{text}</span>
         {evidenceMode && (
           <span className="w3d-label-cls" style={{ background: CLASSIFICATION_COLORS[cls] }}>
-            {cls === 'PUBLIC FACT' ? 'FACT' : cls === 'TYPICAL' ? 'TYP' : cls === 'SIMPLIFIED' ? 'SIMP' : 'SYN'}
+            {SHORT_CLS[cls] ?? 'TYP'}
           </span>
         )}
       </div>
@@ -27,41 +35,86 @@ export function Label({ c, dim, y }: { c: CampusComponent; dim: number; y: numbe
   );
 }
 
+/**
+ * Short 3D label per component.
+ *
+ * The building name is taken from the model rather than sliced out of the id,
+ * because the published names are not a simple sequence — there is no CLN4 on
+ * this campus, and a slice would produce "CLN" for CLN1 and "CLN" for CLN5.
+ */
 function shortLabel(c: CampusComponent): string {
   const t = c.type;
+  const b = c.building ? BUILDING_BY_NAME[Object.keys(BUILDING_BY_NAME).find((k) => BUILDING_BY_NAME[k].n === c.building) ?? 'CLN1'] : undefined;
+
   switch (t) {
     case 'data-hall':
-      return `Data hall ${c.hall}`;
+      return b?.name ?? 'Data hall';
+    case 'hall-floor':
+      return HALL_NAME[c.id.replace('.floor', '')] ?? 'White space';
     case 'generator':
-      return `Generators (${c.offsets?.length ?? 1})`;
-    case 'adiabatic-cooler':
-      return 'Adiabatic heat rejection';
-    case 'reservoir':
-      return 'Cooling water storage';
-    case 'gxp-transformer':
-      return 'GXP transformers';
-    case 'gxp-bay':
-      return 'HV bays and gantries';
-    case 'gxp-platform':
-      return 'Grid exit point';
+      return `${b?.name ?? ''} generators (${c.offsets?.length ?? 1})`.trim();
+    case 'gen-heat-rejection':
+      return `${b?.name ?? ''} engine cooling`.trim();
+    case 'fuel-tank':
+      return `${b?.name ?? ''} fuel tanks`.trim();
+    case 'air-cooler':
+      return `${b?.name ?? ''} air cooling`.trim();
+    case 'heat-exchanger':
+      return `${b?.name ?? ''} heat exchangers`.trim();
+    case 'pump':
+      return `${b?.name ?? ''} pumps`.trim();
+    case 'heat-plume':
+      return 'Heat and vapour rejection';
+    case 'sub-transformer':
+      return 'Step-down transformers';
+    case 'sub-bay':
+      return '220 kV switchyard';
+    case 'sub-platform':
+      return '220 kV substation';
+    case 'sub-control':
+      return 'Substation control';
+    case 'sub-mv-building':
+      return 'Customer MV building';
     case 'hv-line':
-      return 'HV transmission';
+      return '220 kV transmission';
     case 'mv-switchgear':
-      return `${c.id.slice(0, 2)} MV switchgear`;
+      return `${b?.name ?? ''} MV switchgear`.trim();
+    case 'generator-switchgear':
+      return `${b?.name ?? ''} gensw`.trim();
+    case 'unit-substation':
+      return `${b?.name ?? ''} substations`.trim();
     case 'ups':
-      return 'UPS';
+      return `${b?.name ?? ''} UPS`.trim();
+    case 'battery':
+      return `${b?.name ?? ''} batteries`.trim();
+    case 'lv-switchboard':
+      return `${b?.name ?? ''} LV distribution`.trim();
     case 'rack':
-      return 'Racks';
+      return HALL_NAME[c.id.replace('.rack', '')]?.replace(' hall ', ' racks ') ?? 'Racks';
+    case 'server':
+      return HALL_NAME[c.id.replace('.server', '')]?.replace(' hall ', ' IT load ') ?? 'IT load';
+    case 'network-switch':
+      return HALL_NAME[c.id.replace('.switch', '')]?.replace(' hall ', ' fabric ') ?? 'Fabric';
+    case 'storage':
+      return HALL_NAME[c.id.replace('.storage', '')]?.replace(' hall ', ' storage ') ?? 'Storage';
+    case 'busway':
+      return HALL_NAME[c.id.replace('.bus', '')]?.replace(' hall ', ' busway ') ?? 'Busway';
+    case 'crah':
+      return HALL_NAME[c.id.replace('.crah', '')]?.replace(' hall ', ' air cooling ') ?? 'Air cooling';
+    case 'cdu':
+      return HALL_NAME[c.id.replace('.cdu', '')]?.replace(' hall ', ' CDUs ') ?? 'CDUs';
+    case 'cold-plate':
+      return HALL_NAME[c.id.replace('.cold', '')]?.replace(' hall ', ' cold plates ') ?? 'Cold plates';
     case 'bore':
-      return 'Bore field';
+      return 'Production wellfield';
     case 'water-treatment':
       return 'Water treatment';
     case 'stormwater-basin':
-      return 'Stormwater basin';
-    case 'wetland':
-      return 'Wetland and recharge';
-    case 'landing-station':
-      return 'Cable landing station';
+      return 'Attenuation basin';
+    case 'watercourse':
+      return 'Receiving watercourse';
+    case 'fibre-hub':
+      return 'Meet-me rooms';
     case 'fibre-route':
       return 'Fibre route';
     case 'fire':
@@ -69,11 +122,13 @@ function shortLabel(c: CampusComponent): string {
     case 'road':
       return 'Internal roads';
     case 'admin':
-      return c.id === 'site.admin' ? 'Operations building' : 'Logistics and workshop';
+      return c.id === 'site.admin' ? 'Administration building' : 'Expansion administration';
     case 'gatehouse':
       return 'Gatehouse';
-    case 'module-plant':
-      return `Module ${c.module} plant zone`;
+    case 'building-plant':
+      return `${b?.name ?? ''} plant corridor`.trim();
+    case 'network-core':
+      return 'Campus core';
     default:
       return c.label;
   }

@@ -21,7 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Always runs: typecheck, data-model self test, and a production build.
+  # Always runs: typecheck, the data-model self test, a production build, and a
+  # headless-browser smoke test of the built bundle.
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -33,12 +34,38 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npx tsc -b --force
-      - run: npm run selftest
+
+      - name: Typecheck
+        run: npx tsc -b --force
+
+      - name: Data-model self test
+        run: npm run selftest
 
       # BASE_PATH is derived from GITHUB_REPOSITORY by vite.config.ts, so the
       # bundle is prefixed for https://<owner>.github.io/<repo>/.
-      - run: npm run build
+      - name: Production build
+        run: npm run build
+
+      # The smoke suite serves the built bundle, drives it in headless Chromium
+      # over the DevTools protocol, exercises every mode, fails on any console
+      # or page error, checks the phone layout, and writes screenshots to
+      # smoke-out/. It is a required check: it is the only thing that verifies
+      # the WebGL scene renders and that the panels actually compose.
+      - name: Install Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+
+      - name: Browser smoke test
+        run: npm run smoke
+
+      - name: Upload smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: smoke-out/
+          retention-days: 14
 
   # Publishing is opt-in. Pages is not enabled on this repository, and
   # actions/configure-pages fails hard when it is not, so the packaging and

@@ -1,7 +1,7 @@
 import { buildStateOf, useStore, type BuildState } from '../state/store';
 import { toClaim } from '../data/types';
 import { componentCxStatus } from '../state/store';
-import { COMPONENT_BY_ID, HALL_INDEX } from '../data/campus';
+import { BUILDINGS, COMPONENT_BY_ID, HALL_NAME } from '../data/campus';
 import { COMPONENT_INFO } from '../data/componentInfo';
 import { FACT_BY_ID } from '../data/facts';
 import { SYSTEM_META, PACKAGE_COLOR } from '../data/types';
@@ -19,7 +19,8 @@ export function Inspector() {
   const hovered = useStore((s) => s.hovered);
   const select = useStore((s) => s.select);
   const deliveryLayer = useStore((s) => s.deliveryLayer);
-  const setIsolateHall = useStore((s) => s.setIsolateHall);
+  const isolateBuilding = useStore((s) => s.isolateBuilding);
+  const setIsolateBuilding = useStore((s) => s.setIsolateBuilding);
   const cxState = useStore((s) => s.cx);
   const constructPhase = useStore((s) => s.constructPhase);
   const evidenceMode = useStore((s) => s.evidenceMode);
@@ -31,7 +32,12 @@ export function Inspector() {
   if (!c || !info) return null;
   const cx = componentCxStatus(cxState, c.id);
 
-  const hallId = c.hall ? Object.entries(HALL_INDEX).find(([, v]) => v === c.hall)?.[0] : undefined;
+  /* The published building name, and the hall name, both taken from the model
+     rather than from the component id. The campus numbering skips CLN4, so a
+     parsed id would lie. */
+  const building = c.building ? BUILDINGS.find((b) => b.n === c.building) : undefined;
+  const hallKey = c.hall ? Object.keys(HALL_NAME).find((k) => k.startsWith(`${building?.name ?? ''}.`)) : undefined;
+  const hallName = hallKey && c.hall ? HALL_NAME[Object.keys(HALL_NAME).filter((k) => k.startsWith(hallKey))[c.hall - 1]] : undefined;
 
   return (
     <div className="panel right scrolly">
@@ -41,8 +47,8 @@ export function Inspector() {
           <div className="tiny">
             <span className="swatch" style={{ background: SYSTEM_META[c.system].color }} />
             {SYSTEM_META[c.system].label}
-            {c.module ? ` · module ${c.module}` : ''}
-            {c.hall ? ` · hall ${c.hall}` : ''}
+            {building ? ` · ${building.name}` : ''}
+            {hallName ? ` · ${hallName}` : ''}
             {selected ? '' : ' · (hover)'}
           </div>
         </div>
@@ -78,10 +84,10 @@ export function Inspector() {
                   <span className="claim-chip" title={claim.classification}>
                     {claim.classification === 'PUBLIC FACT'
                       ? 'FACT'
-                      : claim.classification === 'TYPICAL'
-                        ? 'TYP'
-                        : claim.classification === 'SIMPLIFIED'
-                          ? 'SIMP'
+                      : claim.classification === 'DERIVED'
+                        ? 'DER'
+                        : claim.classification === 'TYPICAL'
+                          ? 'TYP'
                           : 'SYN'}
                   </span>
                 )}
@@ -104,7 +110,7 @@ export function Inspector() {
       </Section>
 
       <Section title="Failure modes">
-        <ul>
+        <ul className="plain">
           {info.failureModes.map((t, i) => (
             <li key={i}>{t}</li>
           ))}
@@ -123,17 +129,23 @@ export function Inspector() {
           <div>
             <b>Downstream</b> · {info.downstream}
           </div>
-          {c.hall && (
+          {building && (
             <div>
-              <b>Fault domain</b> · hall {c.hall} ({hallId})
-              {c.hall > 1 && (
+              <b>Fault domain</b> · {building.name}
+              {hallName ? ` · ${hallName}` : ''}
+              {isolateBuilding !== building.n && (
                 <>
                   {' '}
-                  <button style={{ padding: '0 5px' }} onClick={() => setIsolateHall(c.hall!)}>
+                  <button style={{ padding: '0 5px' }} onClick={() => setIsolateBuilding(building.n)}>
                     isolate
                   </button>
-                  <button style={{ padding: '0 5px' }} onClick={() => setIsolateHall(null)}>
-                    all
+                </>
+              )}
+              {isolateBuilding === building.n && (
+                <>
+                  {' '}
+                  <button style={{ padding: '0 5px' }} onClick={() => setIsolateBuilding(null)}>
+                    show all
                   </button>
                 </>
               )}
@@ -232,9 +244,9 @@ export function Inspector() {
             </table>
           )}
           {cx.blocking.length > 0 && (
-            <div className="callout">
+            <div className="callout typical">
               <b>Why this equipment is not yet commissioned:</b>
-              <ul style={{ margin: '4px 0 0' }}>
+              <ul className="plain" style={{ margin: '4px 0 0' }}>
                 {cx.blocking.slice(0, 4).map((b, i) => (
                   <li key={i}>{b.message}</li>
                 ))}
@@ -247,8 +259,8 @@ export function Inspector() {
       {(c.facts?.length || info.facts?.length || info.publicLimit) && (
         <Section title="Evidence">
           {info.publicLimit && (
-            <div className="callout blue">
-              <b>What is public:</b> {info.publicLimit}
+            <div className="callout derived">
+              <b>Where the public record stops:</b> {info.publicLimit}
             </div>
           )}
           {(c.facts ?? []).map((fid) => {
@@ -274,7 +286,7 @@ export function Inspector() {
 
       {info.interfaceRisk && info.interfaceRisk.length > 0 && (
         <Section title="What interface usually causes trouble?">
-          <ul className="tiny">
+          <ul className="plain tiny">
             {info.interfaceRisk.map((r, i) => (
               <li key={i}>{r}</li>
             ))}
@@ -284,7 +296,7 @@ export function Inspector() {
 
       {info.controlsTrack && info.controlsTrack.length > 0 && (
         <Section title="What should project controls track?">
-          <ul className="tiny">
+          <ul className="plain tiny">
             {info.controlsTrack.map((r, i) => (
               <li key={i}>{r}</li>
             ))}
@@ -294,7 +306,7 @@ export function Inspector() {
 
       {info.meetingQuestion && (
         <Section title="What question should I ask in a meeting?">
-          <div className="callout blue">{info.meetingQuestion}</div>
+          <div className="callout derived">{info.meetingQuestion}</div>
         </Section>
       )}
 

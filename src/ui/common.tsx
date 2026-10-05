@@ -3,17 +3,18 @@ import type { Classification } from '../data/types';
 import { CLASSIFICATION_MEANING } from '../data/facts';
 import { SOURCE_BY_ID } from '../data/sources';
 
+/** Badge text. The four labels are short enough to sit in a 9.5px badge. */
 const SHORT: Record<Classification, string> = {
   'PUBLIC FACT': 'FACT',
+  DERIVED: 'DERIVED',
   TYPICAL: 'TYPICAL',
-  SIMPLIFIED: 'SIMPLIFIED',
   SYNTHETIC: 'SYNTHETIC',
 };
 
 const CLS: Record<Classification, string> = {
   'PUBLIC FACT': 'fact',
+  DERIVED: 'derived',
   TYPICAL: 'typical',
-  SIMPLIFIED: 'simplified',
   SYNTHETIC: 'synthetic',
 };
 
@@ -25,6 +26,13 @@ export function Badge({ c, title }: { c: Classification; title?: string }) {
   );
 }
 
+/**
+ * Citation links.
+ *
+ * A link renders as its source id rather than as text describing a link, because
+ * the id is how the rest of the application refers to the document and it makes
+ * a claim's provenance checkable at a glance.
+ */
 export function Cite({ ids }: { ids: string[] }) {
   if (!ids.length) return null;
   return (
@@ -36,7 +44,13 @@ export function Cite({ ids }: { ids: string[] }) {
         return (
           <span key={id}>
             {i > 0 && ','}
-            <a className="src-link" href={s.url} target="_blank" rel="noreferrer" title={`${s.publisher} — ${s.title}`}>
+            <a
+              className="src-link"
+              href={s.url}
+              target="_blank"
+              rel="noreferrer"
+              title={`${s.publisher} — ${s.title}`}
+            >
               {id}
             </a>
           </span>
@@ -48,7 +62,7 @@ export function Cite({ ids }: { ids: string[] }) {
 
 export function FactNote({ c, ids, children }: { c: Classification; ids?: string[]; children: ReactNode }) {
   return (
-    <div className={`callout ${c === 'PUBLIC FACT' ? 'fact' : c === 'TYPICAL' ? 'blue' : ''}`}>
+    <div className={`callout ${CLS[c]}`}>
       <Badge c={c} />
       <div style={{ marginTop: 4 }}>{children}</div>
       {ids && ids.length > 0 && (
@@ -78,19 +92,24 @@ export function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
-export function KeyValue({ rows }: { rows: [string, ReactNode][] }) {
-  return (
-    <dl className="kv">
-      {rows.map(([k, v], i) => (
-        <div key={i} style={{ display: 'contents' }}>
-          <dt>{k}</dt>
-          <dd>{v}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+/** Integer formatting. Irish grouping, because this is an Irish project. */
+export function num(n: number) {
+  return n.toLocaleString('en-IE', { maximumFractionDigits: 0 });
 }
 
-export function num(n: number) {
-  return n.toLocaleString('en-NZ', { maximumFractionDigits: 0 });
+/**
+ * The provenance chip used inline in evidence mode.
+ *
+ * Coloured background from the classification palette, so a reader scanning a
+ * claim list sees the evidence status before they read the words.
+ */
+export function ClaimChip({ c, sources }: { c: Classification; sources?: string[] }) {
+  return (
+    <>
+      <span className={`badge ${CLS[c]}`} title={CLASSIFICATION_MEANING[c]}>
+        {SHORT[c]}
+      </span>
+      {sources && sources.length > 0 && <Cite ids={sources} />}
+    </>
+  );
 }

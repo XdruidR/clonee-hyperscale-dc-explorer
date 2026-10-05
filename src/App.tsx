@@ -8,40 +8,83 @@ import { SourcesPanel } from './ui/SourcesPanel';
 import { useStore } from './state/store';
 import { useIsMobile } from './ui/useDevice';
 import { MobileLearnSheet, MobileLegend, MobileTabBar, MobileTopBar } from './ui/Mobile';
+import { BUILDINGS, CAPACITY_NOTES } from './data/campus';
+import { derived, fmtInt } from './data/calculations';
+import { SYSTEM_META } from './data/types';
 
+/**
+ * The campus legend.
+ *
+ * Only shown in Campus mode: in any other mode the mode panel is already telling
+ * the reader which system is in front of them, and a second legend would be a
+ * duplicate. The building list is here rather than in the mode panel because it
+ * is the one fact a first-time visitor needs before anything else: the campus
+ * has five data-storage buildings and there is no CLN4.
+ */
 function Legend() {
   const mode = useStore((s) => s.mode);
   const faults = useStore((s) => s.faults);
-  if (mode !== 'overview') return null;
+  const isolateBuilding = useStore((s) => s.isolateBuilding);
+  const setIsolateBuilding = useStore((s) => s.setIsolateBuilding);
+
   return (
     <div className="legend">
-      <h4>legend</h4>
-      <div className="legend-row">
-        <span className="swatch" style={{ background: '#ffcf3f' }} />
-        power
+      <h4>The campus</h4>
+      <div className="legend-row" style={{ marginBottom: 2 }}>
+        <b>{fmtInt(derived.siteAreaM2 / 10_000)} ha</b>
+        <span className="blurb">consented site</span>
       </div>
-      <div className="legend-row">
-        <span className="swatch" style={{ background: '#ff6b5b' }} />
-        cooling
+      <div className="legend-row" style={{ marginBottom: 4 }}>
+        <b>{fmtInt(derived.itCapacityMW)} MW</b>
+        <span className="blurb">IT, five buildings</span>
       </div>
-      <div className="legend-row">
-        <span className="swatch" style={{ background: '#38bdf8' }} />
-        water
+
+      <h4 style={{ marginTop: 10 }}>Data-storage buildings</h4>
+      {BUILDINGS.map((b) => (
+        <div key={b.n} className="legend-row">
+          <button
+            onClick={() => setIsolateBuilding(isolateBuilding === b.n ? null : b.n)}
+            className={isolateBuilding === b.n ? 'active' : ''}
+            style={{ padding: '1px 6px', fontSize: 'var(--t-micro)' }}
+            title={`Isolate ${b.name}`}
+          >
+            {b.name}
+          </button>
+          <span className="blurb">
+            {b.itMW} MW · {b.gfaM2.toLocaleString('en-IE')} m²
+          </span>
+        </div>
+      ))}
+      <div className="tiny" style={{ marginTop: 4 }}>
+        There is no CLN4. The numbering gap is real and is preserved throughout.
       </div>
-      <div className="legend-row">
-        <span className="swatch" style={{ background: '#a78bfa' }} />
-        data / network
-      </div>
-      <div className="legend-row">
-        <span className="swatch" style={{ background: '#9aa6b2' }} />
-        site and delivery
-      </div>
+
+      {mode === 'overview' && (
+        <>
+          <h4 style={{ marginTop: 10 }}>Systems</h4>
+          {(['power', 'cooling', 'water', 'data', 'site'] as const).map((k) => (
+            <div key={k} className="legend-row">
+              <span className="swatch" style={{ background: SYSTEM_META[k].color }} />
+              {SYSTEM_META[k].label.toLowerCase()}
+              <span className="blurb">{SYSTEM_META[k].blurb}</span>
+            </div>
+          ))}
+          <h4 style={{ marginTop: 10 }}>Public figures that disagree</h4>
+          {CAPACITY_NOTES.map((c) => (
+            <div key={c.figure} className="legend-row">
+              <span className="swatch" style={{ background: 'var(--derived)' }} />
+              {c.figure}
+            </div>
+          ))}
+        </>
+      )}
+
       {faults.length > 0 && (
         <>
-          <h4 style={{ marginTop: 8 }}>injected failures</h4>
+          <h4 style={{ marginTop: 10 }}>Injected failures</h4>
           {faults.map((f) => (
             <div key={f} className="legend-row">
-              <span className="swatch" style={{ background: '#ff3b30' }} />
+              <span className="swatch" style={{ background: 'var(--danger)' }} />
               {f}
             </div>
           ))}
@@ -51,27 +94,31 @@ function Legend() {
   );
 }
 
+/**
+ * The status readout.
+ *
+ * Deliberately not a help string: it reports the live state of the model, and
+ * the controls are self-explanatory enough not to need a hint sitting over the
+ * scene permanently.
+ */
 function Hud() {
   const mode = useStore((s) => s.mode);
   const phase = useStore((s) => s.constructPhase);
   const gridPhase = useStore((s) => s.gridPhase);
+  const controlsMonth = useStore((s) => s.controlsMonth);
   const selected = useStore((s) => s.selected);
+  const faults = useStore((s) => s.faults);
+  const aiRetrofit = useStore((s) => s.aiRetrofit);
+
   return (
     <div className="hud">
-      <div>
-        <b>mode</b> {mode}
-        {mode === 'construction' && <> · phase {phase}</>}
-        {mode === 'power' && gridPhase > 0 && (
-          <>
-            {' '}
-            · grid event step {gridPhase}
-          </>
-        )}
-      </div>
-      <div>
-        <b>hint</b> drag to orbit · scroll to zoom · click any component
-        {selected ? ' · Esc or click empty ground to deselect' : ''}
-      </div>
+      <span className="mode">{mode.replace('ai', 'ai evolution')}</span>
+      {mode === 'construction' && <span>· {phase} of 24 phases</span>}
+      {mode === 'controls' && <span>· data date {controlsMonth} of 24</span>}
+      {gridPhase > 0 && <span>· grid event step {gridPhase} of 8</span>}
+      {faults.length > 0 && <span>· {faults.length} failure{faults.length > 1 ? 's' : ''} injected</span>}
+      {aiRetrofit && <span>· retrofit kit shown</span>}
+      {selected ? <span>· Esc to deselect</span> : null}
     </div>
   );
 }
@@ -134,7 +181,7 @@ function MobileSheet({ onSources }: { onSources: () => void }) {
                 : 'View options'}
         </span>
         <button onClick={() => setSheet(null)} aria-label="Close panel">
-          ✕
+          Close
         </button>
       </div>
       <div className="m-sheet-body scrolly">
@@ -160,16 +207,17 @@ function ViewSheet({ onSources }: { onSources: () => void }) {
   const flows = useStore((s) => s.flows);
   const deliveryLayer = useStore((s) => s.deliveryLayer);
   const evidenceMode = useStore((s) => s.evidenceMode);
+  const aiRetrofit = useStore((s) => s.aiRetrofit);
   const explode = useStore((s) => s.explode);
   const colourBy = useStore((s) => s.colourBy);
   const dayNight = useStore((s) => s.dayNight);
-  const isolateHall = useStore((s) => s.isolateHall);
+  const isolateBuilding = useStore((s) => s.isolateBuilding);
   const isolateTrain = useStore((s) => s.isolateTrain);
   const toggle = useStore((s) => s.toggle);
   const setExplode = useStore((s) => s.setExplode);
   const setColourBy = useStore((s) => s.setColourBy);
   const setDayNight = useStore((s) => s.setDayNight);
-  const setIsolateHall = useStore((s) => s.setIsolateHall);
+  const setIsolateBuilding = useStore((s) => s.setIsolateBuilding);
   const setIsolateTrain = useStore((s) => s.setIsolateTrain);
 
   return (
@@ -188,6 +236,9 @@ function ViewSheet({ onSources }: { onSources: () => void }) {
         <label className={flows ? 'on' : ''}>
           <input type="checkbox" checked={flows} onChange={() => toggle('flows')} /> flow animation
         </label>
+        <label className={aiRetrofit ? 'on' : ''}>
+          <input type="checkbox" checked={aiRetrofit} onChange={() => toggle('aiRetrofit')} /> AI retrofit kit
+        </label>
         <label className={deliveryLayer ? 'on' : ''}>
           <input type="checkbox" checked={deliveryLayer} onChange={() => toggle('deliveryLayer')} /> delivery layer
         </label>
@@ -203,39 +254,40 @@ function ViewSheet({ onSources }: { onSources: () => void }) {
         step={0.05}
         value={explode}
         onChange={(e) => setExplode(Number(e.target.value))}
+        aria-label="Explode the campus by system"
       />
       <h3>Isolate</h3>
       <div className="m-chips">
-        <button onClick={() => setIsolateHall(null)} className={isolateHall === null ? 'active' : ''}>
+        <button onClick={() => setIsolateBuilding(null)} className={isolateBuilding === null ? 'active' : ''}>
           all
         </button>
-        {[1, 2, 3, 4, 5, 6].map((h) => (
+        {BUILDINGS.map((b) => (
           <button
-            key={h}
-            onClick={() => setIsolateHall(isolateHall === h ? null : h)}
-            className={isolateHall === h ? 'active' : ''}
+            key={b.n}
+            onClick={() => setIsolateBuilding(isolateBuilding === b.n ? null : b.n)}
+            className={isolateBuilding === b.n ? 'active' : ''}
           >
-            hall {h}
+            {b.name}
           </button>
         ))}
         <button
           onClick={() => setIsolateTrain(isolateTrain === 'power' ? null : 'power')}
           className={isolateTrain === 'power' ? 'active' : ''}
         >
-          ⚡ train
+          power train
         </button>
         <button
           onClick={() => setIsolateTrain(isolateTrain === 'cooling' ? null : 'cooling')}
           className={isolateTrain === 'cooling' ? 'active' : ''}
         >
-          ❄ loop
+          cooling train
         </button>
       </div>
       <h3>Colour and light</h3>
       <div className="m-toggles">
         <select value={colourBy} onChange={(e) => setColourBy(e.target.value as 'system' | 'package')}>
           <option value="system">colour: system</option>
-          <option value="package">colour: package</option>
+          <option value="package">colour: work package</option>
         </select>
         <select value={dayNight} onChange={(e) => setDayNight(e.target.value as 'day' | 'dusk' | 'night')}>
           <option value="day">day</option>
@@ -245,8 +297,9 @@ function ViewSheet({ onSources }: { onSources: () => void }) {
       </div>
       <h3>Learn</h3>
       <div className="m-toggles">
-        <button onClick={() => useStore.getState().startJourney('electrons')}>⚡ Follow the electrons</button>
-        <button onClick={() => useStore.getState().startJourney('heat')}>🔥 Follow the heat</button>
+        <button onClick={() => useStore.getState().startJourney('power')}>Follow the electrons</button>
+        <button onClick={() => useStore.getState().startJourney('grid')}>The grid connection</button>
+        <button onClick={() => useStore.getState().startJourney('water')}>The water licence</button>
         <button onClick={onSources}>Sources &amp; method</button>
       </div>
     </div>

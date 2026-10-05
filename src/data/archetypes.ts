@@ -1,106 +1,123 @@
-import { INPUTS, derived, fmt } from './calculations';
-import type { Classification } from './types';
-
 /**
- * Rack archetypes.
+ * Rack archetypes: the chain from campus IT megawatts to a single rack.
  *
- * There is no single universal rack power architecture, and pretending there is
- * one teaches the wrong mental model. A current AI hall commonly carries
- * three-phase power much deeper into the rack than the conventional
- * single-phase-per-outlet picture suggests, and some rack-scale systems convert
- * to an internal DC bus.
+ * The first archetype is Clonee as delivered. The other two are what the same
+ * floor area could carry today. Keeping them in one model is the point: the
+ * comparison is only honest when the delivered design and the proposed design
+ * are run through identical arithmetic.
  *
- * Switching archetype recalculates the whole chain:
- *   IT MW -> rack density -> rack count -> distribution -> cooling -> water -> network
- *
- * All archetype parameters are TYPICAL. The 240 MW IT input is PUBLIC FACT; how
- * it is divided into racks is not published.
+ * Every figure for the delivered archetype is DERIVED from published Clonee
+ * inputs — 36 MW per building, four halls per building, 4,170 m² per hall,
+ * 2.24 kW/m². Nothing about the internal rack layout is published, so the rack
+ * count is arithmetic.
  */
+
+import { INPUTS, derived } from './calculations';
 
 export interface RackArchetype {
   id: string;
   name: string;
   summary: string;
-  classification: Classification;
-  /** typical rack density */
+  classification: 'DERIVED' | 'TYPICAL';
+  /** kW per rack, [min, max] */
   rackDensityKw: [number, number];
+  /** fraction of rack heat carried by liquid rather than air */
   coolingMix: string;
   rackPowerArchitecture: string;
   distributionNotes: string[];
   fabricNotes: string[];
   limits: string[];
-  /** what usually limits this design */
+  /** the physical and commercial constraints that actually decide the design */
   limitingFactors: string[];
 }
 
 export const RACK_ARCHETYPES: RackArchetype[] = [
   {
-    id: 'conventional',
-    name: 'A — Conventional cloud rack',
-    summary: 'Lower rack density, mostly air cooled, dual-corded single-phase server power supplies.',
-    classification: 'TYPICAL',
-    rackDensityKw: [10, 20],
-    coolingMix: 'Air cooled. In-row or room air handling does essentially all of the work.',
+    id: 'clonee-delivered',
+    name: 'Clonee as delivered, 2017–2021',
+    summary:
+      'Air-cooled racks in an indirectly air-cooled hall. The whole heat path is air: rack air to in-hall cooling, to a heat exchanger, to air-cooled rejectors outside, with a small evaporative assist on the hottest hours.',
+    classification: 'DERIVED',
+    rackDensityKw: [10, 15],
+    coolingMix: '100% air',
     rackPowerArchitecture:
-      'Three-phase hall supply to a rack PDU, split into single-phase branch circuits. Each server has two power supplies fed from different circuits or different PDUs.',
+      '400/415 V three-phase into the rack, or 230 V single-phase on the rows. No DC distribution, no on-rack conversion of consequence.',
     distributionNotes: [
-      'Busway or overhead tray feeding rack PDUs, which is the conventional arrangement',
-      'Split-phase circuits in the 110-240 V range per server, not three-phase per server',
-      'Cord-and-conductor management dominates the floor design',
+      'Busway in the hall, tap-offs to rack PDUs, dual A and B feeds so one feed can be isolated without dropping the rack.',
+      'Building-level distribution sized for a load of this density leaves plenty of headroom for anything denser.',
     ],
     fabricNotes: [
-      'Two or four 10/25/40G links per host to leaf switches',
-      'Storage on a separate front-end fabric rather than the east-west fabric',
-      'Redundancy is straightforward: dual-homed hosts, dual-homed leaves',
+      '40 to 100 Gb/s to the rack is generous for this density and was the right design at the time.',
+      'Storage traffic, not compute traffic, is what fills the fibre.',
     ],
-    limits: ['Cooling capacity and floor area', 'Power density per rack in older halls', 'Cable count and airflow management'],
-    limitingFactors: ['Airflow and containment', 'Rack count per hall for a given IT load', 'Structured cabling effort'],
+    limits: [
+      'Air cooling tops out around 20–30 kW per rack before the airflow itself becomes the constraint.',
+      'Above that the hall needs liquid, and a hall with no liquid loop cannot simply be given one.',
+    ],
+    limitingFactors: [
+      'The building itself: bar form, floor loading, and a plant corridor designed for air-side heat rejection.',
+      'Electrical headroom, which this design has in abundance and which is the only reason a retrofit is physically possible at all.',
+    ],
   },
   {
-    id: 'hybrid',
-    name: 'B — High-density hybrid rack',
-    summary: 'Moderate to high rack density with direct liquid cooling for accelerators and residual air cooling.',
+    id: 'modern-air',
+    name: 'Modern air-cooled compute',
+    summary:
+      'What the same hall could carry with faster air cooling and higher-density servers, before liquid arrives. Rack power roughly triples and the airflow problem becomes the design problem.',
     classification: 'TYPICAL',
-    rackDensityKw: [30, 70],
-    coolingMix:
-      'Direct-to-chip liquid cooling for accelerators, with in-row air handling still removing the heat from power supplies, memory and network gear.',
+    rackDensityKw: [30, 60],
+    coolingMix: '100% air',
     rackPowerArchitecture:
-      'Increasingly three-phase into a rack power shelf, with DC distribution inside the rack rather than AC all the way to each server.',
+      'Three-phase at higher current. A 60 kW rack draws about 84 A on 415 V three-phase, so the per-rack feeder and tap-off become the constraint rather than the hall feeder.',
     distributionNotes: [
-      'Busway sections sized for much higher current per rack',
-      'Rack power shelves converting and distributing internally',
-      'More tap-off units and a higher fault-current study',
+      'Per-rack current rises faster than per-rack power because the power factor of modern accelerators is lower.',
+      'Existing rack PDUs and busway tap-offs sized for 12.5 kW are several times undersized for this.',
+      'Busway may be reusable as infrastructure while tap-offs and PDUs are not.',
     ],
     fabricNotes: [
-      'Higher-radix switch ports per host, often 100G or more to the fabric',
-      'Front-end and east-west fabrics are more distinctly separated',
-      'Optics count and cleanliness become an operational issue',
+      'Compute is now east-west dominant, so the top-of-rack switch count and optical count rise sharply.',
+      'A 60 kW rack typically carries 2 to 4 times the network ports of a conventional rack.',
     ],
-    limits: ['CDU capacity and floor space for CDUs', 'Cooling water temperature and approach', 'Switch power in the rack top'],
-    limitingFactors: ['CDU capacity and redundancy', 'Fabric bandwidth and optics supply', 'Leak risk and detection zoning'],
+    limits: [
+      'Air is a poor conductor and a poor carrier. Above roughly 30 kW per rack the fan power and the acoustic problem stop being manageable.',
+      'Rack depth and rear clearance stop accommodating the airflow that this density needs.',
+    ],
+    limitingFactors: [
+      'Airflow. This is the whole design problem at this density.',
+      'Rack PDU and tap-off current capacity.',
+      'The acoustic and containment strategy of the hall.',
+    ],
   },
   {
-    id: 'ai-rack-scale',
-    name: 'C — Rack-scale AI system',
-    summary: 'Rack-scale systems of roughly 100-150 kW or more, liquid-dominant, high-power three-phase in.',
+    id: 'ai-liquid',
+    name: 'Rack-scale liquid-cooled AI',
+    summary:
+      'A rack-scale system where the compute tray is a single sealed unit taking 50 V DC from power shelves in the same rack, and roughly nine-tenths of the heat is captured by cold plates rather than by air. This is not an upgrade to Clonee; it is a different building.',
     classification: 'TYPICAL',
-    rackDensityKw: [100, 150],
-    coolingMix:
-      'Liquid cooling dominant. Air remains for the power shelves and switches, but the accelerators are almost entirely on cold plates.',
+    rackDensityKw: [120, 192],
+    coolingMix: 'About 90% liquid, 10% air',
     rackPowerArchitecture:
-      'High-power three-phase feed to a rack power shelf, which converts to an internal DC busbar. There is no per-server AC distribution and usually no per-server dual PSU: redundancy moves up to the shelf and the feed.',
+      'The rack is the unit of supply. Power shelves convert AC to 50 V DC inside the rack, an internal busbar carries it to the compute trays, and the whole rack arrives by a single high-current three-phase whip connection.',
     distributionNotes: [
-      'Very high current per rack, so busway, tap-off and protection are sized around it',
-      'Redundancy is at shelf and feed level rather than per server',
-      'Upstream capacity and fault levels are a real design constraint',
+      'Busway must be provisioned to the worst case, not the operating case: about 267 A per rack at the design point rather than the 184 A drawn in normal operation.',
+      'That is several times the current of the delivered design per rack, so busway, tap-offs and PDUs are all replaced.',
+      'Whole-rack replacement rather than component replacement changes the maintenance model completely.',
     ],
     fabricNotes: [
-      'Extreme east-west bandwidth: a rack-scale system is a single network domain',
-      'Collective communication patterns dominate traffic, not storage reads',
-      'Congestion, oversubscription and collective-communication behaviour become design inputs',
+      'The rack-scale switch fabric is part of the rack, which removes a whole layer of the network design.',
+      'Power and network both enter at the rack as one pre-assembled assembly.',
     ],
-    limits: ['Coolant delivery and return capacity per rack', 'Supply temperature above the dew point', 'East-west fabric and optics supply'],
-    limitingFactors: ['Fabric bandwidth and collective-communication behaviour', 'Optics supply and fibre quality', 'Cooling water temperature at the design wet-bulb'],
+    limits: [
+      'The 10% of heat still going to air means in-hall air cooling cannot be removed, only supplemented.',
+      'Supply temperature matters enormously. Modern platforms warrant coolant inlet up to about 45 °C, which is what makes dry-cooler-only heat rejection viable in a temperate climate.',
+      'A hall with an air-side primary loop cannot natively accept this. Realistic paths are liquid-to-air sidecar units, or a wholesale conversion to a chilled-water loop.',
+    ],
+    limitingFactors: [
+      'Electricity. Not floor area. This is the finding that matters most.',
+      'Structural floor loading: a loaded rack-scale system is roughly 2,100 kg/m² against a conventional design of about 1,500 kg/m².',
+      'Busway and tap-off current capacity, several times undersized.',
+      'Whether the hall has a water loop that can be re-piped to deliver 32–45 °C supply, or must be bypassed entirely.',
+    ],
   },
 ];
 
@@ -108,136 +125,186 @@ export interface ArchetypeChain {
   archetype: RackArchetype;
   rackDensityKw: number;
   racksTotal: number;
+  racksPerBuilding: number;
   racksPerHall: number;
   hallFloorPerRackM2: number;
   coolingToLiquidShare: number;
-  pduPowerPerRackKw: number;
+  coolingToAirShare: number;
+  /** amps per rack on 415 V three-phase, at the archetype's nominal density */
   buswayCurrentPerRackA: number;
-  /** MW of heat that must be rejected, which is simply the IT load */
+  /** amps per rack at the worst-case design point, which is what gets provisioned */
+  buswayCurrentPerRackEdbpA: number;
   heatToRejectMw: number;
-  /** MW of compressor load implied by the residual air cooling (liquid cooling has none) */
-  compressorLoadMw: number;
-  /** m3/yr of cooling water, using the campus water intensity from the canonical calculation */
+  heatToLiquidMw: number;
+  heatToAirMw: number;
+  /** coolant flow implied by ΔT = Q / (ṁ · c_p) */
+  coolantFlowLPerMinPerRack: number;
   coolingWaterM3Yr: number;
-  /** estimate of east-west ports implied, illustrative only */
   networkPortsPerRack: number;
-  assumptions: string[];
+  /** share of the existing IT floor area's rack positions that the supply can fund */
+  rackPositionUtilisationPct: number;
+  assumptions: { key: string; value: number; note: string }[];
 }
 
-const WATER_INTENSITY_M3_PER_MWH = derived.waterM3PerMwhIt;
-
 /**
- * The recalculation chain, driven entirely off the canonical inputs. The
- * per-unit factors are TYPICAL and are listed in `assumptions` so the panel can
- * show them rather than hide them.
+ * Run an archetype through the arithmetic, on the Clonee campus.
+ *
+ * `itMw` defaults to the consent-derived campus capacity. The interesting
+ * result is `rackPositionUtilisationPct`: for every archetype it is far below
+ * 100%, because the campus has far more floor than it has electricity.
  */
-export function chainFor(archetype: RackArchetype, itMw = 240): ArchetypeChain {
-  const density = (archetype.rackDensityKw[0] + archetype.rackDensityKw[1]) / 2;
+export function chainFor(archetypeId: string, itMw = derived.itCapacityMW): ArchetypeChain {
+  const a = RACK_ARCHETYPES.find((x) => x.id === archetypeId) ?? RACK_ARCHETYPES[0];
+
+  const hallFloorM2 = INPUTS.hallFloorM2;
+  const hallsPerBuilding = INPUTS.hallsPerBuilding;
+  const buildingCount = INPUTS.buildingCount;
+  const hallCount = buildingCount * hallsPerBuilding;
+
+  /* Nominal rack density for this archetype, biased to the upper half of the
+     published band because that is where a real estate returns are aimed. */
+  const density = a.rackDensityKw[0] + (a.rackDensityKw[1] - a.rackDensityKw[0]) * 0.6;
+  /* Provision for the worst case rather than the operating case. */
+  const edbp = a.rackDensityKw[1];
+
   const racksTotal = Math.round((itMw * 1000) / density);
-  const racksPerHall = Math.round(racksTotal / 6);
-  const liquidShare =
-    archetype.id === 'conventional' ? 0 : archetype.id === 'hybrid' ? 0.6 : 0.9;
-  const airMw = itMw * (1 - liquidShare);
-  /* Heat rejected is just the IT load. What differs between archetypes is how
-     much of it is carried by liquid (no compressor penalty) versus air (needs
-     compression). Air-side here means a wet-bulb-limited or compression-assisted
-     arrangement, so ~20% compressor load is a reasonable TYPICAL allowance. */
-  const compressorLoadMw = airMw * 0.2;
-  const buswayA = (density * 1000) / (Math.sqrt(3) * 415) / 0.95;
+  const racksPerHall = Math.ceil(racksTotal / hallCount);
+  const racksPerBuilding = racksPerHall * hallsPerBuilding;
+
+  const liquidShare = a.id === 'clonee-delivered' ? 0 : a.id === 'modern-air' ? 0 : INPUTS.aiLiquidShare;
+  const airShare = 1 - liquidShare;
+
+  const itHeatMw = itMw;
+  const heatToLiquidMw = itHeatMw * liquidShare;
+  const heatToAirMw = itHeatMw * airShare;
+
+  /* Three-phase current. Irish campus distribution is 400/415 V. */
+  const v = Math.sqrt(3) * INPUTS.buswayVolts;
+  const buswayCurrentPerRackA = (density * 1000) / v;
+  const buswayCurrentPerRackEdbpA = (edbp * 1000) / v;
+
+  /* Coolant flow from first principles: ṁ = Q / (c_p · ΔT). */
+  const cP = 4.18; // kJ/kg·K for water
+  const dT = INPUTS.aiDeltaTK;
+  const coolantFlowLPerMinPerRack =
+    liquidShare > 0 ? ((density * liquidShare * dT) / (cP * dT)) * 60 : 0;
+
+  /* Water: only the liquid share is evaporatively assisted. The air share is
+     rejected to atmosphere with no water involved. */
+  const coolingWaterM3Yr = (heatToLiquidMw * 1000 * derived.hoursPerYear * 3.6 * 0.1) / 2.44;
+
+  const networkPortsPerRack = a.id === 'clonee-delivered' ? 2 : a.id === 'modern-air' ? 4 : 8;
+
+  /* How much of the campus IT floor area could physically be racked, against
+     how much of it the electrical supply can actually fund. */
+  const rackPositionsInItArea = Math.round(INPUTS.itAreaM2 / INPUTS.rackSpaceM2);
+  const fundedRacks = Math.round((itMw * 1000) / density);
+  const rackPositionUtilisationPct = (fundedRacks / rackPositionsInItArea) * 100;
+
   return {
-    archetype,
+    archetype: a,
     rackDensityKw: density,
     racksTotal,
+    racksPerBuilding,
     racksPerHall,
-    hallFloorPerRackM2: (8_210 * 6) / racksTotal,
+    hallFloorPerRackM2: hallFloorM2 / racksPerHall,
     coolingToLiquidShare: liquidShare,
-    pduPowerPerRackKw: density * 0.98,
-    buswayCurrentPerRackA: buswayA,
-    heatToRejectMw: itMw,
-    compressorLoadMw,
-    coolingWaterM3Yr: itMw * INPUTS.hoursPerYear * WATER_INTENSITY_M3_PER_MWH,
-    networkPortsPerRack: archetype.id === 'conventional' ? 2 : archetype.id === 'hybrid' ? 4 : 8,
+    coolingToAirShare: airShare,
+    buswayCurrentPerRackA,
+    buswayCurrentPerRackEdbpA,
+    heatToRejectMw: itHeatMw,
+    heatToLiquidMw,
+    heatToAirMw,
+    coolantFlowLPerMinPerRack,
+    coolingWaterM3Yr,
+    networkPortsPerRack,
+    rackPositionUtilisationPct,
     assumptions: [
-      'rack density is the midpoint of the archetype range',
-      `three-phase at 415 V for the busway current estimate, and ${fmt(0.95, 2)} power factor`,
-      'heat rejected equals the IT load; the archetype difference is the compressor penalty on the residual air fraction, taken as 20% of the air-cooled share',
-      'cooling water uses the campus water intensity derived from the published demand and IT load',
-      'port counts are illustrative of the class, not a design',
+      { key: 'Rack density', value: density, note: 'Upper-biased point in the published band for this archetype.' },
+      { key: 'Hall floor area', value: hallFloorM2, note: 'Published: approximately 4,170 m² per hall.' },
+      { key: 'Halls', value: hallCount, note: 'DERIVED: five buildings of four halls.' },
+      { key: 'Distribution voltage', value: INPUTS.buswayVolts, note: 'Irish three-phase distribution voltage.' },
+      { key: 'Liquid capture share', value: liquidShare, note: 'Published platform figure for rack-scale systems. Not a Clonee value.' },
+      { key: 'Coolant design ΔT', value: dT, note: 'Common facility-water design delta for liquid cooling.' },
+      { key: 'Evaporative assist', value: 0.1, note: 'Irish climate: outside-air free cooling carries most of the year.' },
     ],
   };
 }
 
-/**
- * The layered view of the network, which is more useful than showing only
- * fibre geometry. Each layer answers a different question and has a different
- * limiting factor.
- */
+/* ------------------------------------------------------------------ network */
+
 export interface NetworkLayer {
   id: string;
   name: string;
   path: string;
   purpose: string;
   limitingFactors: string[];
-  classification: Classification;
+  classification: 'PUBLIC FACT' | 'DERIVED' | 'TYPICAL';
 }
 
+/**
+ * The network in layers, from the county boundary to the rack.
+ *
+ * Clonee is an overland fibre campus, not a subsea landing. The project record
+ * describes two meet-me rooms per building for data connectivity, which makes
+ * external connectivity the first layer to think about and the one most often
+ * assumed rather than designed.
+ */
 export const NETWORK_LAYERS: NetworkLayer[] = [
   {
-    id: 'wan',
-    name: 'External / WAN',
-    path: 'Subsea cable → landing station → external routing → campus edge',
-    purpose: 'Carries traffic to and from the internet and to other facilities.',
+    id: 'carrier',
+    name: 'Carrier and terrestrial fibre',
+    path: 'National backhaul to the Clonee site boundary',
+    purpose: 'Bring traffic from the rest of the network into the campus.',
+    limitingFactors: ['Carrier availability and diversity at the Clonee exchange', 'Physical route and duct capacity'],
+    classification: 'TYPICAL',
+  },
+  {
+    id: 'route',
+    name: 'Two diverse site routes',
+    path: 'Two physically separate routes from the boundary to the campus',
+    purpose: 'So that one excavation, one duct or one bridge does not remove external connectivity.',
     limitingFactors: [
-      'Physical fibre availability and route diversity',
-      'Landing station power and cooling, which are usually their own single point of failure',
-      'Carrier capacity and peering arrangements',
+      'Diversity is easy to draw and easy to lose: shared ducting, a shared bridge or a shared landlord compound removes it entirely.',
+      'Both routes need to be visible to both ends of the ring, or a break is invisible until someone traces it.',
+    ],
+    classification: 'TYPICAL',
+  },
+  {
+    id: 'meetme',
+    name: 'Meet-me rooms',
+    path: 'Two meet-me rooms per building',
+    purpose: 'Carrier handoff and interconnection, physically separated for security and for failure.',
+    limitingFactors: [
+      'A published project characteristic of this campus: two meet-me rooms per building.',
+      'Access control and physical separation are as much a requirement as the cabling.',
     ],
     classification: 'PUBLIC FACT',
   },
   {
     id: 'core',
-    name: 'Campus core',
-    path: 'Campus core → hall aggregation',
-    purpose: 'Aggregation and routing. Where access, peering and inter-hall traffic meet.',
-    limitingFactors: ['Device capacity and uplink oversubscription', 'Control-plane stability', 'Power and cooling of the core room'],
+    name: 'Campus aggregation core',
+    path: 'Campus core feeding each building',
+    purpose: 'Terminate and redistribute external traffic into the building networks.',
+    limitingFactors: ['Single building, so its loss is campus-wide loss of external connectivity while compute continues'],
+    classification: 'DERIVED',
+  },
+  {
+    id: 'hall-fabric',
+    name: 'Building fabric',
+    path: 'Building aggregation to hall',
+    purpose: 'Present a stable topology to each hall regardless of what the fabric outside is doing.',
+    limitingFactors: ['Optical budget', 'Card and port capacity'],
     classification: 'TYPICAL',
   },
   {
-    id: 'mgmt',
-    name: 'Management / out-of-band',
-    path: 'BMC → management switches → operations and automation',
-    purpose:
-      'Delivers remote console, power control, firmware and telemetry. Deliberately separate from the workload networks, because that is the point of it.',
+    id: 'rack',
+    name: 'Top-of-rack',
+    path: 'Top-of-rack switch to each server',
+    purpose: 'The last hop into the compute.',
     limitingFactors: [
-      'Segregation from the workload fabric',
-      'Credential and access management for who can reach a BMC',
-      'Keeping it working when the workload fabric is broken, which is when it is needed',
-    ],
-    classification: 'TYPICAL',
-  },
-  {
-    id: 'storage',
-    name: 'Storage / front-end fabric',
-    path: 'storage ↔ compute',
-    purpose: 'Moves datasets and checkpoints to and from the compute nodes.',
-    limitingFactors: [
-      'Rebuild storms after a storage failure, which can saturate the fabric',
-      'Sequential read patterns at very high concurrency',
-      'Whether storage sits in a separate power and cooling domain',
-    ],
-    classification: 'TYPICAL',
-  },
-  {
-    id: 'east-west',
-    name: 'Accelerator / east-west fabric',
-    path: 'GPU ↔ GPU ↔ GPU',
-    purpose:
-      'Carries the traffic that actually consumes the fabric: the collectives a training job performs thousands of times a second.',
-    limitingFactors: [
-      'Collective-communication patterns, which behave very differently from storage traffic',
-      'Oversubscription ratio and where congestion appears',
-      'Optics supply, optics quality and fibre cleanliness',
-      'Topology, especially the radix and the number of hops a message takes',
+      'Port count and optical count dominate cost and failure.',
+      'Rack density drives this hard: a modern rack-scale system carries its own switch fabric, which removes this layer entirely.',
     ],
     classification: 'TYPICAL',
   },

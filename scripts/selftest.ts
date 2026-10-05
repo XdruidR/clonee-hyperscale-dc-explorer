@@ -11,12 +11,16 @@ import {
   COMPONENTS,
   COMPONENT_BY_ID,
   FLOW_LINKS,
-  MODULES,
+  BUILDINGS,
+  SITE,
   HALLS,
+  RETROFIT_HALL,
   POWER_CHAIN,
   HEAT_CHAIN,
   FIBRE_CHAIN,
+  COOLANT_CHAIN,
   instanceCount,
+  RACKS_PER_HALL,
 } from '../src/data/campus';
 import { COMPONENT_INFO } from '../src/data/componentInfo';
 import { PHASES } from '../src/data/phases';
@@ -30,9 +34,7 @@ import { join } from 'node:path';
 
 import {
   buildStateOf,
-  laggedPhase,
-  modulePhaseOffset,
-  modulesReady,
+  buildingsReady,
   canStartStage,
   blockersForPackage,
   nextStageForPackage,
@@ -41,10 +43,11 @@ import {
   outstandingPackages,
 } from '../src/state/store';
 import { TURNOVER_PACKAGES, PACKAGE_BY_ID, packagesContaining } from '../src/data/turnover';
-import { derived, INPUTS, waterIntensitySentence } from '../src/data/calculations';
+import { derived, INPUTS, ASSUMPTIONS, waterIntensitySentence, capacityReconciliationSentence } from '../src/data/calculations';
 import { supplyFromSequenceStep, supplyState, SUPPLY_ASSUMPTIONS } from '../src/data/supply';
 import { RACK_ARCHETYPES, chainFor, NETWORK_LAYERS } from '../src/data/archetypes';
-import { toClaim } from '../src/data/types';
+import { toClaim, CLASSIFICATIONS } from '../src/data/types';
+import { SCENARIOS, budgetAt, EARNED_VALUE, RISKS, CHANGES, MILESTONES, TOTAL_BUDGET_M } from '../src/data/controls';
 import { WATER_BALANCE } from '../src/data/water';
 
 const cxStageIndex = (id: string) => CX_ORDER.indexOf(id);
@@ -67,7 +70,7 @@ function section(name: string) {
 /* ---------------------------------------------------------------- structure */
 section('campus model');
 ok(COMPONENTS.length > 140, `expected a substantial component list, got ${COMPONENTS.length}`);
-ok(instanceCount() > 5000, `expected thousands of rendered instances, got ${instanceCount()}`);
+ok(instanceCount() > 20000, `expected thousands of rendered instances, got ${instanceCount()}`);
 const ids = new Set<string>();
 for (const c of COMPONENTS) {
   ok(!ids.has(c.id), `duplicate component id: ${c.id}`);
@@ -87,48 +90,137 @@ console.log(
 
 /* ------------------------------------------------------------------- layout */
 section('layout sanity');
-const hallComps = COMPONENTS.filter((c) => c.type === 'data-hall');
-ok(hallComps.length === 6, `expected 6 data halls, got ${hallComps.length}`);
-for (const h of hallComps) {
-  const area = h.size[0] * h.size[2];
+/* The five data-storage buildings are single-storey bars. Their footprint is
+   the published four halls plus the published plant area, so this is the one
+   geometric check that can be made against a source. */
+const bars = COMPONENTS.filter((c) => c.type === 'data-hall');
+ok(bars.length === BUILDINGS.length, `expected ${BUILDINGS.length} data-storage bars, got ${bars.length}`);
+for (const bar of bars) {
+  const b = BUILDINGS.find((x) => x.n === bar.building)!;
+  const area = bar.size[0] * bar.size[2];
+  /* Four halls of 4,170 m2 plus about 11,000 m2 of plant. The modelled bar is
+     280 m x 106 m, which is deliberately a little larger than the arithmetic
+     because it includes circulation and the plant corridor. */
+  const expected = b.halls.length * INPUTS.hallFloorM2 + INPUTS.plantAreaM2PerBuilding;
   ok(
-    Math.abs(area - 8210) / 8210 < 0.06,
-    `hall ${h.hall} footprint ${Math.round(area)} m2 deviates from the public ~8,210 m2 figure`,
+    area > expected && area < expected * 1.35,
+    `${b.name} bar footprint ${Math.round(area)} m2 should sit just above ${expected} m2 of published hall and plant area`,
   );
-  const overlaps = hallComps.filter((o) => o !== h).filter((o) =>
-    Math.abs(o.pos[0] - h.pos[0]) * 2 < o.size[0] + h.size[0] && Math.abs(o.pos[2] - h.pos[2]) * 2 < o.size[2] + h.size[2],
-  );
-  ok(overlaps.length === 0, `hall ${h.hall} overlaps hall ${overlaps.map((o) => o.hall).join(',')}`);
+  ok(bar.size[1] < 20, `${b.name} should be a single-storey bar, got ${bar.size[1]} m tall`);
 }
-const genBlocks = COMPONENTS.filter((c) => c.type === 'generator');
-ok(genBlocks.length === 6, `six generation blocks expected (one per hall), got ${genBlocks.length}`);
+/* No two buildings may overlap. */
+for (const bar of bars) {
+  const overlaps = bars.filter((o) => o !== bar).filter(
+    (o) => Math.abs(o.pos[0] - bar.pos[0]) * 2 < o.size[0] + bar.size[0] && Math.abs(o.pos[2] - bar.pos[2]) * 2 < o.size[2] + bar.size[2],
+  );
+  ok(overlaps.length === 0, `${bar.id} overlaps ${overlaps.map((o) => o.id).join(',')}`);
+}
+/* Every building must sit inside the consented site. */
+for (const bar of bars) {
+  ok(
+    Math.abs(bar.pos[0]) + bar.size[0] / 2 <= SITE.halfW && Math.abs(bar.pos[2]) + bar.size[2] / 2 <= SITE.halfD,
+    `${bar.id} extends outside the ${(SITE.halfW * 2 * SITE.halfD * 2 / 10_000).toFixed(1)} ha site`,
+  );
+}
 ok(
-  genBlocks.reduce((a, c) => a + (c.offsets?.length ?? 0), 0) === 84,
-  `84 generators expected in the model, got ${genBlocks.reduce((a, c) => a + (c.offsets?.length ?? 0), 0)}`,
+  Math.abs((SITE.halfW * 2 * SITE.halfD * 2) / 10_000 - INPUTS.siteAreaHa) < 2,
+  `the modelled site rectangle should be about the consented ${INPUTS.siteAreaHa} ha`,
 );
-ok(genBlocks.every((c) => c.hall && c.module), 'every generation block should be attributed to a hall and module');
-const genSpan = Math.max(...genBlocks.flatMap((c) => (c.offsets ?? []).map(([x]) => Math.abs(x) + c.size[0] / 2)));
-ok(genSpan < 26, `generator blocks must stay inside the module plant zone, reached x=${genSpan}`);
+
+/* Generation: 90 sets across five compounds, 18 each. */
+const genBlocks = COMPONENTS.filter((c) => c.type === 'generator');
+ok(genBlocks.length === BUILDINGS.length, `one generation compound per building expected, got ${genBlocks.length}`);
+const genTotal = genBlocks.reduce((a, c) => a + (c.offsets?.length ?? 0), 0);
+ok(genTotal === INPUTS.generatorCount, `${INPUTS.generatorCount} generators expected in the model, got ${genTotal}`);
+ok(
+  genBlocks.every((c) => (c.offsets?.length ?? 0) === INPUTS.generatorsPerBuilding),
+  `every building should carry ${INPUTS.generatorsPerBuilding} generators`,
+);
+ok(genBlocks.every((c) => c.building), 'every generation compound should be attributed to a building');
+/* A generator compound must clear its own building, which is the whole reason
+   it sits behind the bar rather than between the halls. */
+for (const g of genBlocks) {
+  const bar = bars.find((b) => b.building === g.building)!;
+  const gap = g.pos[2] - (bar.pos[2] + bar.size[2] / 2);
+  const compoundHalfDepth = 24 + g.size[2] / 2;
+  ok(gap < -compoundHalfDepth, `${g.id} overlaps its own building bar`);
+}
 const fuelBlocks = COMPONENTS.filter((c) => c.type === 'fuel-tank');
-ok(fuelBlocks.length === 6 && fuelBlocks.every((c) => (c.offsets?.length ?? 0) === 14), 'each generation block should carry one fuel tank per set');
+ok(
+  fuelBlocks.length === genBlocks.length &&
+    fuelBlocks.every((c, i) => (c.offsets?.length ?? 0) === (genBlocks[i].offsets?.length ?? 0)),
+  'each generation compound should carry one fuel tank per set',
+);
+/* One rejector plume per building. */
 const plumes = COMPONENTS.filter((c) => c.type === 'heat-plume');
-ok(plumes.length === 3, 'one heat rejection plume per module expected');
-for (const h of hallComps) {
-  const other = COMPONENTS.filter(
-    (c) => c.module === h.module && c.hall !== h.hall && c.size[1] > 1.5 && c.type !== 'module-plant',
+ok(plumes.length === BUILDINGS.length, `one heat rejection plume per building expected, got ${plumes.length}`);
+
+/* Building-level equipment sits inside the bar footprint on purpose: the plant
+   corridor and the electrical rooms are part of the building, not beside it. The
+   assertion that matters is that everything inside the envelope is genuinely at
+   ground level and low enough to fit under a single-storey roof. */
+for (const bar of bars) {
+  const inside = COMPONENTS.filter(
+    (c) =>
+      c.id !== bar.id &&
+      c.building === bar.building &&
+      c.hall === undefined &&
+      Math.abs(c.pos[0] - bar.pos[0]) * 2 < bar.size[0] + c.size[0] &&
+      Math.abs(c.pos[2] - bar.pos[2]) * 2 < bar.size[2] + c.size[2] &&
+      c.type !== 'building-plant' &&
+      c.type !== 'hall-floor',
   );
-  const clash = other.filter((c) =>
-    Math.abs(c.pos[0] - h.pos[0]) * 2 < c.size[0] + h.size[0] && Math.abs(c.pos[2] - h.pos[2]) * 2 < c.size[2] + h.size[2],
+  ok(inside.length > 0, `${bar.id} should contain building-level plant and electrical rooms`);
+  const tooTall = inside.filter((c) => c.pos[1] + c.size[1] > bar.size[1]);
+  ok(
+    tooTall.length === 0,
+    `${bar.id}: equipment inside the envelope must fit under the roof: ${tooTall.map((c) => c.id).join(', ')}`,
   );
-  ok(clash.length === 0, `hall ${h.hall} overlaps module plant: ${clash.map((c) => c.id).join(', ')}`);
+  /* The generator compound and the heat rejection must be outside it. */
+  const outside = COMPONENTS.filter((c) => c.building === bar.building && (c.type === 'generator' || c.type === 'air-cooler'));
+  for (const o of outside) {
+    const withinX = Math.abs(o.pos[0] - bar.pos[0]) * 2 < bar.size[0] + o.size[0];
+    const withinZ = Math.abs(o.pos[2] - bar.pos[2]) * 2 < bar.size[2] + o.size[2];
+    ok(!(withinX && withinZ), `${o.id} (${o.type}) must sit outside ${bar.id}`);
+  }
 }
-const gxpTowers = COMPONENTS.filter((c) => c.type === 'hv-tower');
-ok(gxpTowers.length === 4, `public record describes 4 towers (2 replaced + 2 new), got ${gxpTowers.length}`);
+
+/* Two new 220 kV transmission towers for the loop-in. */
+const towers = COMPONENTS.filter((c) => c.type === 'hv-tower');
+ok(towers.length === INPUTS.newTransmissionTowers, `the consent describes ${INPUTS.newTransmissionTowers} new transmission towers, got ${towers.length}`);
 const bores = COMPONENTS.find((c) => c.id === 'site.bore')!;
-ok(bores.offsets?.length === 5, `bore field of 4-5 bores modelled, got ${bores.offsets?.length}`);
-for (const m of MODULES) {
-  ok(m.halls.length === 2, `module ${m.n} should contain two halls`);
+ok(bores.offsets && bores.offsets.length >= 4, `a wellfield of several bores expected, got ${bores.offsets?.length}`);
+
+/* The substation compound must hold the published equipment. */
+ok(
+  Math.abs((SITE.sub.w * SITE.sub.d - INPUTS.substationAreaM2) / INPUTS.substationAreaM2) < 0.08,
+  `the modelled substation compound should be about the published ${INPUTS.substationAreaM2} m2`,
+);
+ok(
+  COMPONENTS.filter((c) => c.id.startsWith('sub.tower')).length === INPUTS.newTransmissionTowers,
+  'both new transmission towers must be modelled',
+);
+ok(
+  COMPONENTS.find((c) => c.id === 'sub.xfmr')!.offsets?.length === INPUTS.stepDownTransformers,
+  `three step-down transformers expected, got ${COMPONENTS.find((c) => c.id === 'sub.xfmr')!.offsets?.length}`,
+);
+for (const b of BUILDINGS) {
+  ok(b.halls.length === 4, `${b.name} should contain four halls, got ${b.halls.length}`);
 }
+/* The published building names skip CLN4, and the model must preserve that
+   rather than renumbering. */
+ok(
+  BUILDINGS.map((b) => b.name).join(',') === 'CLN1,CLN2,CLN3,CLN5,CLN6',
+  `building names must be the published ones with the CLN4 gap preserved, got ${BUILDINGS.map((b) => b.name).join(',')}`,
+);
+ok(
+  BUILDINGS.every((b) => b.itMW === INPUTS.itMwPerBuilding),
+  'every building should carry the consented 36 MW capacity',
+);
+ok(
+  BUILDINGS.filter((b) => b.gfaBasis === 'PUBLISHED').length >= 3,
+  'at least three buildings should have a published floor area',
+);
 
 /* --------------------------------------------------------------- flow graph */
 section('flow graph');
@@ -156,29 +248,40 @@ const walk = (start: string, medium?: string) => {
   return seen;
 };
 const powerReach = walk('hv.line');
-ok(powerReach.has('gxp.xfmr'), 'power graph does not reach the GXP transformer from the transmission line');
-ok(powerReach.has('M1-W.gpu'), 'power graph does not reach an accelerator from the transmission line');
+ok(powerReach.has('sub.xfmr'), 'power graph does not reach the GXP transformer from the transmission line');
+ok(powerReach.has('CLN1.h1.server'), 'power graph does not reach the IT load from the transmission line');
 ok(
-  walk('M1-W.gpu').has('M1.cool'),
-  'cooling graph does not reach heat rejection from the accelerator',
+  walk('CLN1.h1.server').has('CLN1.cool'),
+  'cooling graph does not reach heat rejection from the IT load',
 );
 ok(
-  walk('M1-W.hall').has('M1-W.res'),
-  'water graph does not reach the reservoir from the hall roof',
+  walk('CLN1.h1.server').has('site.ambient'),
+  'the cooling graph must terminate at the atmosphere',
 );
-ok(walk('site.basin').has('site.wetland'), 'water graph does not reach the wetland from the stormwater basin');
+ok(walk('site.basin').has('site.watercourse'), 'water graph does not reach the watercourse from the attenuation basin');
 ok(walk('site.potable').has('site.ww'), 'water graph does not reach wastewater treatment from the potable system');
 const dataReach = walk('site.fibre');
 ok(dataReach.has('site.core'), 'data graph does not reach the campus core from the fibre route');
-ok(dataReach.has('M1-W.gpu'), 'data graph does not reach an accelerator from the fibre route');
+ok(dataReach.has('CLN1.h1.server'), 'data graph does not reach the IT load from the fibre route');
+
+/* Every hall must be reachable and must be able to reject its heat. This is the
+   check that catches a flow graph that works for the first building only. */
 for (const h of HALLS) {
-  ok(powerReach.has(`${h}.gpu`), `no power path to the accelerator in ${h}`);
-  ok(walk(`${h}.gpu`).has(`${h}.cold`), `no cooling path to the cold plates in ${h}`);
-  ok(walk(`${h}.gpu`).has(`${h}.cdu`), `no cooling path to a CDU in ${h}`);
+  const b = h.split('.')[0];
+  ok(powerReach.has(`${h}.server`), `no power path to the IT load in ${h}`);
+  ok(walk(`${h}.server`).has(`${h}.crah`), `no cooling path to the in-hall air cooling in ${h}`);
+  ok(walk(`${h}.server`).has(`${b}.cool`), `no cooling path to heat rejection in ${h}`);
+  /* The retrofit kit is modelled for every hall, because the AI mode may be
+     pointed at any of them; it must have a complete loop when it exists. */
+  ok(walk(`${h}.server`).has(`${h}.cold`), `no cooling path to the cold plates in ${h}`);
+  ok(walk(`${h}.server`).has(`${h}.cdu`), `no cooling path to a coolant distribution unit in ${h}`);
   ok(dataReach.has(`${h}.switch`), `no data path to the fabric in ${h}`);
-  ok(walk('site.bore').has(`${h}.res`), `no groundwater make-up path to the reservoir under ${h}`);
+  ok(walk('site.bore').has(`${b}.cool`), `no groundwater make-up path to the cooling plant of ${b}`);
+  /* Cooling must be a real path from the rack to atmosphere, not just a link
+     to a component with no onward route. */
+  ok(walk(`${h}.server`).has('site.ambient'), `no route from ${h} to ambient`);
 }
-for (const chain of [POWER_CHAIN, HEAT_CHAIN, FIBRE_CHAIN]) {
+for (const chain of [POWER_CHAIN, HEAT_CHAIN, COOLANT_CHAIN, FIBRE_CHAIN]) {
   for (const id of chain) ok(!!COMPONENT_BY_ID[id], `chain references unknown component ${id}`);
 }
 
@@ -203,7 +306,7 @@ ok(!canStartStage('install-check', noneDone), 'install check should not be start
 const afterFactory = ['design-review', 'factory-test'];
 ok(canStartStage('install-check', afterFactory), 'install check should be startable once the factory test is done');
 const emptyCx: Record<string, string[]> = {};
-const itPkg = 'M1-W.IT';
+const itPkg = 'CLN1.h1.IT';
 const itBlockers = blockersForPackage(emptyCx, itPkg);
 ok(itBlockers.length > 0, 'a hall IT turnover package should be blocked with nothing commissioned');
 ok(
@@ -227,19 +330,19 @@ for (const p of TURNOVER_PACKAGES) {
 /* an IT package cannot be signed off while its upstream packages are not */
 {
   const cx: Record<string, string[]> = {};
-  const itStages = PACKAGE_BY_ID['M1-W.IT'].stages;
-  for (const st of itStages) cx['M1-W.IT'] = [...(cx['M1-W.IT'] ?? []), st];
+  const itStages = PACKAGE_BY_ID['CLN1.h1.IT'].stages;
+  for (const st of itStages) cx['CLN1.h1.IT'] = [...(cx['CLN1.h1.IT'] ?? []), st];
   ok(
-    blockersForPackage(cx, 'M1-W.IT').length > 0,
+    blockersForPackage(cx, 'CLN1.h1.IT').length > 0,
     'signing off every IT stage must still be blocked by the upstream packages',
   );
   /* satisfy the whole upstream chain and it should clear */
-  for (const id of ['GXP', 'M1.PWR', 'M1.GEN', 'M1.COOL', 'SITE.NET', 'M1-W.PWR', 'M1-W.NET', 'M1-W.COOL']) {
+  for (const id of ['SUB', 'CLN1.h2.PWR', 'CLN1.GEN', 'CLN1.COOL', 'SITE.NET', 'CLN1.h1.PWR', 'CLN1.h1.NET', 'CLN1.h1.COOL']) {
     cx[id] = [...PACKAGE_BY_ID[id].stages];
   }
   ok(
-    blockersForPackage(cx, 'M1-W.IT').length === 0,
-    `IT package should be unblocked once every upstream package is signed off, got: ${blockersForPackage(cx, 'M1-W.IT').map((b) => b.message).join(' | ')}`,
+    blockersForPackage(cx, 'CLN1.h1.IT').length === 0,
+    `IT package should be unblocked once every upstream package is signed off, got: ${blockersForPackage(cx, 'CLN1.h1.IT').map((b) => b.message).join(' | ')}`,
   );
 }
 /* component commissioning status is derived from its package AND the packages it
@@ -257,74 +360,117 @@ for (const p of TURNOVER_PACKAGES) {
     walk(pkgId);
   };
 
-  ok(componentCxStatus(cx, 'M1-W.rack').status === 'not-started', 'a rack should be not-started initially');
-  ok(componentCxStatus(cx, 'M1-W.upsA').status === 'not-started', 'a UPS should be not-started initially');
+  ok(componentCxStatus(cx, 'CLN1.h1.rack').status === 'not-started', 'a rack should be not-started initially');
+  ok(componentCxStatus(cx, 'CLN1.upsA').status === 'not-started', 'a UPS should be not-started initially');
 
-  /* sign off the power package only: a UPS still cannot be accepted, because its
-     package depends on the module MV switchgear and the generation block */
-  cx['M1-W.PWR'] = [...PACKAGE_BY_ID['M1-W.PWR'].stages];
+  /* Sign off the UPS's own building-level electrical package only. It still
+     cannot be accepted, because that package depends on the building MV
+     switchgear and the generation block, neither of which is signed off. This
+     is the whole point of computing status over the upstream closure rather
+     than over the component's own package. */
+  cx['CLN1.ELEC'] = [...PACKAGE_BY_ID['CLN1.ELEC'].stages];
   ok(
-    componentCxStatus(cx, 'M1-W.upsA').status === 'in-progress',
+    componentCxStatus(cx, 'CLN1.upsA').status === 'in-progress',
     'a UPS whose own package is signed off but whose upstream packages are not must be in-progress, not complete',
   );
   ok(
-    componentCxStatus(cx, 'M1-W.upsA').blocking.length > 0,
+    componentCxStatus(cx, 'CLN1.upsA').blocking.length > 0,
     'the UPS must report its unsigned upstream packages as blockers',
   );
   ok(
-    componentCxStatus(cx, 'M1-W.rack').status !== 'complete',
+    componentCxStatus(cx, 'CLN1.h1.rack').status !== 'complete',
     'a rack must NOT complete when only its power package is signed off',
   );
   ok(
-    componentCxStatus(cx, 'M1-W.rack').packages.length > 1,
+    componentCxStatus(cx, 'CLN1.h1.rack').packages.length > 1,
     'a rack status must span its own package plus the packages it depends on',
   );
 
-  completeClosure('M1-W.IT');
+  completeClosure('CLN1.h1.IT');
   ok(
-    componentCxStatus(cx, 'M1-W.rack').status === 'complete',
-    `completing the IT package and its full upstream closure should complete the rack, got ${componentCxStatus(cx, 'M1-W.rack').status}`,
+    componentCxStatus(cx, 'CLN1.h1.rack').status === 'complete',
+    `completing the IT package and its full upstream closure should complete the rack, got ${componentCxStatus(cx, 'CLN1.h1.rack').status}`,
   );
   ok(
-    componentCxStatus(cx, 'M1-W.gpu').status === 'complete',
+    componentCxStatus(cx, 'CLN1.h1.server').status === 'complete',
     'an accelerator in the same package should complete with it',
   );
   ok(
-    componentCxStatus(cx, 'M2-W.rack').status !== 'complete',
+    componentCxStatus(cx, 'CLN1.h2.rack').status !== 'complete',
     'completing hall 1 must not complete hall 2 - turnover packages are hall-scoped',
   );
   ok(
-    componentCxStatus(cx, 'M2-W.gpu').status !== 'complete',
+    componentCxStatus(cx, 'CLN1.h2.gpu').status !== 'complete',
     'completing hall 1 must not complete hall 2 accelerators',
   );
   ok(outstandingPackages(cx).length > 0, 'the site as a whole is still not fully commissioned');
 }
-ok(packagesContaining('M1-W.rack').length === 1, 'a rack should sit in exactly one turnover package');
-ok(packagesContaining('M1.mv').length === 1, 'an MV lineup should sit in exactly one turnover package');
-ok(packagesContaining('M1-W.upsA').length === 1, 'a UPS should sit in exactly one turnover package');
+ok(packagesContaining('CLN1.h1.rack').length === 1, 'a rack should sit in exactly one turnover package');
+ok(packagesContaining('CLN1.mv').length === 1, 'an MV lineup should sit in exactly one turnover package');
+ok(packagesContaining('CLN1.upsA').length === 1, 'a UPS should sit in exactly one turnover package');
 
 /* --------------------------------------------------------- construction time */
 section('construction programme');
-ok(PHASES.length === 36, `expected 36 phases, got ${PHASES.length}`);
-ok(PHASES[0].id === 'existing', 'first phase should be the existing site');
-ok(PHASES[PHASES.length - 1].id === 'handover', 'last phase should be operational handover');
-const fullBuild = buildStateOf(COMPONENT_BY_ID['M1-W.rack'], PHASES.length - 1);
+ok(PHASES.length >= 20, `expected a substantial phase sequence, got ${PHASES.length}`);
+ok(PHASES[0].id === 'baseline', 'the first phase should be the greenfield site');
+ok(
+  PHASES.some((p) => p.id === 'grid-energised'),
+  'the programme must contain the 220 kV energisation, which is the hinge of the real delivery',
+);
+ok(
+  PHASES[PHASES.length - 1].id === 'horizon',
+  'the last phase should be the statement of what the record does not say',
+);
+/* The real dates are the point of this sequence, so they must survive. */
+const gridPhase = PHASES.find((p) => p.id === 'grid-energised')!;
+ok(gridPhase.period.includes('2017'), `the grid energisation should be dated 2017, got "${gridPhase.period}"`);
+ok(
+  PHASES.some((p) => p.period.includes('2015')),
+  'the consent year must appear in the programme',
+);
+ok(
+  PHASES.filter((p) => !p.inferred && p.months > 0).length >= 8,
+  'the programme must be anchored to at least eight dated published events',
+);
+/* Inferred phases must be marked rather than hidden. */
+ok(
+  PHASES.some((p) => p.inferred) && PHASES.some((p) => !p.inferred),
+  'the programme should distinguish dated phases from inferred ones',
+);
+
+const fullBuild = buildStateOf(COMPONENT_BY_ID['CLN1.h1.rack'], PHASES.length - 1);
 ok(fullBuild.state === 'complete', 'a rack should exist at the end of the programme');
-ok(buildStateOf(COMPONENT_BY_ID['M1-W.rack'], 0).state === 'hidden', 'a rack should not exist at phase 0');
-ok(buildStateOf(COMPONENT_BY_ID['hv.line'], 0).state === 'complete', 'the existing transmission line exists at phase 0');
-const shedAt35 = buildStateOf(COMPONENT_BY_ID['tmp.sheds'], 35);
-ok(shedAt35.state === 'hidden', 'temporary site sheds should be gone by handover');
-ok(
-  buildStateOf(COMPONENT_BY_ID['M3-W.rack'], 25).state !== 'complete',
-  'module 3 racks should not be installed while module 1 racks are being installed (phased delivery)',
-);
-ok(
-  buildStateOf(COMPONENT_BY_ID['M1-W.rack'], 33).state === 'complete' &&
-    buildStateOf(COMPONENT_BY_ID['M3-W.rack'], 33).state !== 'complete',
-  'module 1 should be operational before module 3',
-);
+ok(buildStateOf(COMPONENT_BY_ID['CLN1.h1.rack'], 0).state === 'hidden', 'a rack should not exist at phase 0');
+ok(buildStateOf(COMPONENT_BY_ID['hv.line'], 0).state === 'complete', 'the transmission line exists at phase 0');
+const shedAtEnd = buildStateOf(COMPONENT_BY_ID['tmp.sheds'], PHASES.length - 1);
+ok(shedAtEnd.state === 'hidden', 'temporary site sheds should be gone by handover');
+
+/* Phased delivery, using the real building windows rather than a lag table. */
+{
+  const cln1Fitout = BUILDINGS[0].fitout[1];
+  const cln6Fitout = BUILDINGS.find((b) => b.name === 'CLN6')!.fitout[1];
+  ok(
+    buildStateOf(COMPONENT_BY_ID['CLN1.h1.rack'], cln1Fitout).state === 'complete',
+    'CLN1 racks must be installed by the end of the CLN1 fit-out',
+  );
+  ok(
+    buildStateOf(COMPONENT_BY_ID['CLN6.h1.rack'], cln1Fitout).state !== 'complete',
+    'CLN6 racks must not be installed while CLN1 is still being fitted out - phased delivery',
+  );
+  ok(cln6Fitout > cln1Fitout, 'CLN6 must be delivered after CLN1');
+  ok(
+    buildStateOf(COMPONENT_BY_ID['CLN6.h1.rack'], cln6Fitout).state === 'complete',
+    'CLN6 racks must be complete by the end of the CLN6 fit-out',
+  );
+}
 /* there must be exactly one module-lag model in the source tree */
 {
+  /* There must be exactly one construction timeline, and it must be the per
+     component build window in campus.ts. The predecessor carried a second
+     hidden model in a MODULE_SHIFT table that shifted every component's dates;
+     Clonee's buildings have genuinely different schedules, so the lag was
+     removed and the information moved onto the components. These assertions
+     exist to stop it creeping back in. */
   const offenders: string[] = [];
   const walk = (dir: string) => {
     for (const f of readdirSync(dir, { withFileTypes: true })) {
@@ -332,40 +478,78 @@ ok(
       if (f.isDirectory()) walk(p);
       else if (/\.tsx?$/.test(f.name)) {
         const src = readFileSync(p, 'utf8');
-        // any hardcoded (module - 1) * n lag, or a second MODULE_SHIFT table
-        if (/\(module\s*-\s*1\)\s*\*/.test(src)) offenders.push(`${p}: duplicate module lag expression`);
-        if (/MODULE_SHIFT\s*[:=]/.test(src) && !p.endsWith('state/store.ts')) offenders.push(`${p}: second MODULE_SHIFT`);
-        if (/modulesLive/.test(src)) offenders.push(`${p}: leftover modulesLive timeline`);
+        if (/MODULE_SHIFT/.test(src)) offenders.push(`${p}: MODULE_SHIFT timeline is gone; use build windows`);
+        if (/laggedPhase/.test(src)) offenders.push(`${p}: laggedPhase timeline is gone; use build windows`);
+        if (/modulePhaseOffset/.test(src)) offenders.push(`${p}: module lag table is gone; use build windows`);
       }
     }
   };
   walk('src');
-  ok(offenders.length === 0, `duplicate construction-timeline models found: ${offenders.join('; ')}`);
-  ok(modulePhaseOffset(1) === 0 && modulePhaseOffset(2) > 0 && modulePhaseOffset(3) > modulePhaseOffset(2),
-    'module lag must increase with module number');
-  ok(laggedPhase(29, 3) <= PHASES.length - 1, 'module 3 fitout must land inside the programme');
+  ok(offenders.length === 0, `a second construction-timeline model crept back in: ${offenders.join('; ')}`);
 }
 
-/* module readiness must be monotonic and end with all modules handed over */
-{
-  const r1 = modulesReady(0, COMPONENTS);
-  const r35 = modulesReady(PHASES.length - 1, COMPONENTS);
-  ok(r1.every((r) => !r.live), 'no module should be live at phase 0');
-  ok(r35.every((r) => r.live && r.handedOver), 'all modules should be handed over at the end');
+/* Every component must carry its own build window, and it must be inside the
+   phase list. This is what makes the timeline single-sourced. */
+for (const c of COMPONENTS) {
+  ok(c.build.length === 2 && c.build[0] <= c.build[1], `${c.id} has an invalid build window ${c.build}`);
   ok(
-    modulesReady(20, COMPONENTS).every((r) => !r.live),
-    'no module should be live before the fitout phase',
+    c.build[0] >= 0 && c.build[1] < PHASES.length,
+    `${c.id} build window ${c.build} falls outside the ${PHASES.length}-phase programme`,
   );
-  const mids = modulesReady(29, COMPONENTS);
-  ok(mids[0].live && !mids[2].live, 'module 1 should be live before module 3 - phased delivery');
+}
+
+/* building readiness must be monotonic and end with every building handed over */
+{
+  const start = buildingsReady(0, COMPONENTS);
+  const end = buildingsReady(PHASES.length - 1, COMPONENTS);
+  ok(start.every((r) => !r.live), 'no building should be live at phase 0');
+  ok(end.every((r) => r.live && r.handedOver), 'all five buildings should be handed over at the end');
+  ok(start.every((r) => r.componentsComplete === 0), 'nothing should be complete at phase 0');
   ok(
-    r35.every((r) => r.componentsComplete === r.componentsTotal),
-    'every module component should be complete at handover',
+    end.every((r) => r.componentsComplete === r.componentsTotal),
+    'every building component should be complete at handover',
+  );
+  /* Phased delivery: CLN1 is live long before CLN6, which is the whole point of
+     a campus delivered in tranches rather than all at once. */
+  const atCln1Handover = buildingsReady(BUILDINGS[0].handover, COMPONENTS);
+  ok(
+    atCln1Handover[0].live && !atCln1Handover[4].live,
+    'CLN1 should be live before CLN6 - phased delivery',
+  );
+  /* Readiness must not go backwards as the programme advances. Compared per
+     component id, because comparing per-building totals would hide a component
+     disappearing while its siblings accumulate. */
+  {
+    const regressions: string[] = [];
+    const prev = new Set<string>();
+    for (let p = 0; p < PHASES.length; p++) {
+      const now = new Set(
+        COMPONENTS.filter((c) => c.building !== undefined && buildStateOf(c, p).state === 'complete').map((c) => c.id),
+      );
+      for (const id of prev) if (!now.has(id)) regressions.push(`${id} at phase ${p}`);
+      prev.clear();
+      for (const id of now) prev.add(id);
+    }
+    ok(regressions.length === 0, `component completion must be monotonic; regressions: ${regressions.slice(0, 5).join(', ')}`);
+  }
+  ok(
+    buildingsReady(PHASES.length - 1, COMPONENTS).reduce((a, r) => a + r.itMW, 0) === INPUTS.buildingCount * INPUTS.itMwPerBuilding,
+    'the live IT load at handover must equal the consented campus capacity',
   );
 }
 
 /* the whole campus must actually finish inside the programme */
-for (const id of ['M1-W.rack', 'M2-W.rack', 'M3-W.rack', 'M3-E.gpu', 'M2-E.cdu', 'M3.cool', 'gxp.xfmr']) {
+for (const id of [
+  'CLN1.h1.rack',
+  'CLN1.h2.rack',
+  'CLN3.h4.rack',
+  'CLN5.h1.rack',
+  'CLN6.h4.server',
+  'CLN6.cool',
+  'sub.xfmr',
+  'CLN3.gen',
+  'site.wtp',
+]) {
   ok(
     buildStateOf(COMPONENT_BY_ID[id], PHASES.length - 1).state === 'complete',
     `${id} is still incomplete at handover - a lagged module ran off the end of the programme`,
@@ -374,7 +558,7 @@ for (const id of ['M1-W.rack', 'M2-W.rack', 'M3-W.rack', 'M3-E.gpu', 'M2-E.cdu',
 
 /* ---------------------------------------------------------------- journeys */
 section('journeys');
-ok(JOURNEYS.length >= 10, `expected at least 10 guided journeys, got ${JOURNEYS.length}`);
+ok(JOURNEYS.length >= 8, `expected at least 8 guided journeys, got ${JOURNEYS.length}`);
 for (const j of JOURNEYS) {
   ok(j.steps.length > 0, `journey ${j.id} has no steps`);
   ok(!!j.classificationHint, `journey ${j.id} has no classification hint`);
@@ -427,15 +611,70 @@ for (const s of FAULT_SCENARIOS) {
 
 /* -------------------------------------------------------- public arithmetic */
 section('public arithmetic (consistency of the published figures)');
-const genMW = 84 * 3.2;
-ok(Math.abs(genMW - 268.8) < 0.01, `84 x 3.2 MW should be 268.8 MW, got ${genMW}`);
-ok(genMW / 240 > 1 && genMW / 240 < 1.2, 'the generation margin narrative depends on a ratio near 1.1x');
-const heatMW = 84 * 5.3;
-ok(Math.abs(heatMW - 445.2) < 0.01, `84 x 5.3 MW should be 445.2 MW, got ${heatMW}`);
-const litresPerKWh = (288_000 * 1000) / (240 * 1000 * 8760);
-ok(litresPerKWh > 0.1 && litresPerKWh < 0.2, `derived water intensity should be ~0.14 L/kWh, got ${litresPerKWh}`);
-const roofArea = 6 * 74 * 110;
-ok(roofArea > 40_000, `modelled hall roof area ${roofArea} m2 should exceed the public ~30,000 m2 captured area`);
+/* Campus capacity, from the consent. */
+ok(INPUTS.buildingCount * INPUTS.itMwPerBuilding === 180, 'five buildings at 36 MW is 180 MW IT');
+ok(derived.itCapacityMW === 180, `derived campus IT should be 180 MW, got ${derived.itCapacityMW}`);
+/* The two independent public routes must nearly agree, or the reconciliation
+   narrative in the UI is making a claim the arithmetic does not support. */
+ok(
+  derived.capacityRoutesDifferPct < 10,
+  `the two public capacity routes should agree to within 10%, they differ by ${derived.capacityRoutesDifferPct.toFixed(1)}%`,
+);
+ok(
+  derived.hallPowerDensityFromConsentKwM2 > 2 && derived.hallPowerDensityFromConsentKwM2 < 2.5,
+  `36 MW over four 4,170 m2 halls should land near the published 2.24 kW/m2, got ${derived.hallPowerDensityFromConsentKwM2}`,
+);
+
+/* Generation: 90 sets is published, the split and rating are derived. */
+ok(INPUTS.generatorCount === 90, 'EPA P1192 records 90 diesel generators');
+ok(
+  derived.generatorRatedMW > derived.itCapacityMW,
+  'generation must exceed the IT load, or the emergency power system has no margin',
+);
+ok(
+  derived.generationVsIt > 1.1 && derived.generationVsIt < 1.4,
+  `generation should sit around 1.25x IT load, got ${derived.generationVsIt.toFixed(2)}x`,
+);
+
+/* The N-1 transformer case is the resilience narrative; it only works if there
+   is a real shortfall, which is why the model must not quietly size the
+   transformers so that N-1 is free. */
+ok(
+  derived.nMinusOneMva > 0 && derived.nMinusOneShortfallMW > 0,
+  'losing one of three transformers must leave a real capacity shortfall, or the N-1 teaching point is false',
+);
+ok(
+  derived.nMinusOneShortfallMW > 20 && derived.nMinusOneShortfallMW < 90,
+  `the N-1 shortfall should be about one building, got ${derived.nMinusOneShortfallMW.toFixed(0)} MW`,
+);
+
+/* Water: Irish climate, so a small evaporative fraction and a low intensity. */
+ok(
+  derived.wueLPerKwh > 0.02 && derived.wueLPerKwh < 0.5,
+  `derived WUE should be low for an Irish air-cooled campus, got ${derived.wueLPerKwh.toFixed(3)} L/kWh`,
+);
+ok(
+  derived.dischargeM3Yr > 100_000 && derived.dischargeM3Yr < 600_000,
+  `derived annual site water should be in the low hundreds of thousands of m3, got ${derived.dischargeM3Yr.toFixed(0)}`,
+);
+
+/* The AI finding: the retrofit is power-constrained, not space-constrained. */
+ok(
+  derived.geometricUtilisationPct < 25,
+  `the supply should fund a small fraction of the physical rack positions, got ${derived.geometricUtilisationPct.toFixed(1)}%`,
+);
+ok(
+  derived.aiRackAmpsEdbp > derived.deliveredRackAmps * 5,
+  'an AI rack at the design point must draw several times the delivered per-rack current',
+);
+ok(
+  derived.densityJump > 5,
+  `the rack density jump should be about an order of magnitude, got ${derived.densityJump.toFixed(1)}x`,
+);
+
+/* Roof area available for water capture. */
+const roofArea = BUILDINGS.length * SITE.buildingWidth * SITE.buildingDepth;
+ok(roofArea > 100_000, `modelled building roof area ${roofArea} m2 should exceed the published 97,000 m2 total area`);
 
 /* ================================================================== SEMANTIC
  * Tests from the review's section 10: these check the meaning of the model,
@@ -444,24 +683,71 @@ ok(roofArea > 40_000, `modelled hall roof area ${roofArea} m2 should exceed the 
 
 section('semantic: canonical calculations drive every displayed quantity');
 
-/* the canonical figures, recomputed independently here */
+/* The canonical figures, recomputed independently from the assumptions rather
+   than read back out of `derived`, so a change to the derivation cannot pass by
+   agreeing with itself. */
 {
-  const expectLPerKWh = (288_000 * 1000) / (INPUTS.itCapacityMW * 1000 * INPUTS.hoursPerYear);
+  const A = Object.fromEntries(ASSUMPTIONS.map((a) => [a.key, a.value])) as Record<string, number>;
+  const hours = derived.hoursPerYear;
+  const itMw = derived.itCapacityMW;
+
+  /* Water. IT heat is all the electrical input, so the same litres per kWh is
+     both the water per kWh of IT and the water per kWh of heat rejected. */
+  const heatGjPerYear = itMw * 1000 * hours * 0.0036;
+  const expectedEvaporation = (heatGjPerYear * A.evaporativeFraction) / A.evaporationEnthalpy;
+  const expectedDischarge = expectedEvaporation * A.blowdownFactor;
+  const expectedLPerKWh = (expectedDischarge * 1000) / (itMw * 1000 * hours);
   ok(
-    Math.abs(derived.waterKgPerKwhIt - expectLPerKWh) < 1e-9,
-    `canonical water intensity drifted: ${derived.waterKgPerKwhIt} vs ${expectLPerKWh}`,
+    Math.abs(derived.dischargeM3Yr - expectedDischarge) < 1,
+    `derived site water drifted: ${derived.dischargeM3Yr.toFixed(0)} vs ${expectedDischarge.toFixed(0)} m3/yr`,
   );
   ok(
-    Math.abs(derived.waterKgPerKwhHeat - derived.waterKgPerKwhIt) < 1e-9,
-    'water per kWh of heat rejected must equal water per kWh of IT load, since all IT power becomes heat',
+    Math.abs(derived.wueLPerKwh - expectedLPerKWh) < 1e-9,
+    `canonical water intensity drifted: ${derived.wueLPerKwh} vs ${expectedLPerKWh}`,
+  );
+  /* m3/MWh and L/kWh are the same quantity expressed differently. */
+  ok(
+    Math.abs(derived.wueM3PerMwh - derived.wueLPerKwh) < 1e-9,
+    'm3/MWh and L/kWh are the same quantity and must agree',
+  );
+  /* Discharge exceeds evaporation, because blowdown carries the concentrated
+     solids that evaporation leaves behind. The ratio is the blowdown factor. */
+  ok(
+    derived.dischargeM3Yr > derived.evaporationM3Yr && derived.blowdownM3Yr > 0,
+    'discharge must exceed evaporation: blowdown carries the concentrated solids',
   );
   ok(
-    Math.abs(derived.waterM3PerMwhIt - derived.waterKgPerKwhIt) < 1e-9,
-    'm3/MWh and kg/kWh are numerically identical and must agree',
+    Math.abs(derived.dischargeM3Yr / derived.evaporationM3Yr - A.blowdownFactor) < 1e-9,
+    'discharge must be evaporation scaled by the blowdown factor',
   );
-  ok(Math.abs(derived.generationRatedMW - 268.8) < 0.01, 'generation rated MW drifted');
-  ok(Math.abs(derived.generationHeatMW - 445.2) < 0.01, 'generator heat MW drifted');
-  ok(waterIntensitySentence().includes('0.137'), 'the canonical sentence must contain the canonical figure');
+
+  /* Generation. */
+  const expectedGenMw = (INPUTS.generatorCount * A.generatorRatedKw) / 1000;
+  ok(
+    Math.abs(derived.generatorRatedMW - expectedGenMw) < 1e-9,
+    `generation rated MW drifted: ${derived.generatorRatedMW} vs ${expectedGenMw}`,
+  );
+  const expectedGenHeat = (INPUTS.generatorCount * A.generatorHeatReleaseKw) / 1000;
+  ok(
+    Math.abs(derived.generationHeatMW - expectedGenHeat) < 1e-9,
+    `generator heat MW drifted: ${derived.generationHeatMW} vs ${expectedGenHeat}`,
+  );
+  /* Engines reject more heat than they convert. This is why a campus with no IT
+     load still needs heat rejection. */
+  ok(
+    A.generatorHeatReleaseKw > A.generatorRatedKw,
+    'each generator must reject more heat than it makes electricity',
+  );
+
+  /* The canonical sentence must carry the figure, or the panels can drift. */
+  ok(
+    waterIntensitySentence().includes(derived.wueLPerKwh.toFixed(2)),
+    `the canonical water sentence must contain the canonical figure ${derived.wueLPerKwh.toFixed(2)}`,
+  );
+  ok(
+    capacityReconciliationSentence().includes('180'),
+    'the capacity reconciliation must state the derived campus capacity',
+  );
 }
 
 /* No UI narrative may restate a derived quantity by hand. */
@@ -504,19 +790,28 @@ section('semantic: every operational source reaches its critical loads');
     }
     return seen;
   };
-  for (const h of HALLS) {
-    const reach = fromGen(`${h}.gen`);
+  /* Generation is per building on this campus, so the source is one compound
+     and the check is that it can reach every hall in its own building. */
+  for (const b of BUILDINGS) {
+    const reach = fromGen(`${b.name}.gen`);
+    ok(reach.has(`${b.name}.mv`), `generation in ${b.name} has no path to the building MV / emergency bus`);
+    for (const h of b.halls) {
+      ok(
+        reach.has(`${h}.server`),
+        `generation in ${b.name} has no electrical path to the IT load in ${h}`,
+      );
+    }
+    /* The substation transformer is fed BY the grid, not by the generators:
+       they are alternative sources into the same bus, not a chain. This is the
+       assertion that stops a supply model treating generation as downstream of
+       the grid connection. */
     ok(
-      reach.has(`${h}.gpu`),
-      `generation in ${h} has no electrical path to the accelerator in the same hall`,
+      !reach.has('sub.transformer'),
+      `generation in ${b.name} must not reach the step-down transformer: grid and generation are alternate sources`,
     );
-    const mod = h.slice(0, 2);
-    ok(reach.has(`${mod}.mv`), `generation in ${h} has no path to the campus MV / emergency bus`);
-    /* the GXP transformer is fed BY the grid, not by the generators: they are
-       alternative sources into the same bus, not a chain */
     ok(
-      !reach.has('gxp.xfmr'),
-      `generation must not reach the GXP transformer in ${h}: grid and generation are alternate sources`,
+      !reach.has('hv.line'),
+      `generation in ${b.name} must not reach the transmission line`,
     );
   }
   /* and generation must be able to close onto the same bus the grid feeds */
@@ -533,10 +828,10 @@ section('semantic: every operational source reaches its critical loads');
   );
   /* both sources must converge on the same bus, which is what makes the
      utility-loss sequence an electrical state change rather than a narration */
-  for (const mod of MODULES) {
-    const feeders = FLOW_LINKS.filter((lk) => lk.medium === 'mv' && lk.to === `${mod.id}.mv`).map((lk) => lk.from);
-    ok(feeders.some((f) => f.includes('xfmr')), `${mod.id}.mv has no utility source`);
-    ok(feeders.some((f) => f.includes('gensw')), `${mod.id}.mv has no generation source`);
+  for (const b of BUILDINGS) {
+    const feeders = FLOW_LINKS.filter((lk) => lk.medium === 'mv' && lk.to === `${b.name}.mv`).map((lk) => lk.from);
+    ok(feeders.some((f) => f.includes('xfmr')), `${b.name}.mv has no utility source`);
+    ok(feeders.some((f) => f.includes('gensw')), `${b.name}.mv has no generation source`);
   }
 }
 
@@ -556,7 +851,7 @@ section('semantic: generator heat does not flow through the IT cooling loop');
   );
   /* the two problems must be separately visible in the model */
   ok(
-    !!COMPONENT_BY_ID['site.ambient'] && !!COMPONENT_BY_ID['M1-W.genheat'],
+    !!COMPONENT_BY_ID['site.ambient'] && !!COMPONENT_BY_ID['CLN1.genheat'],
     'both heat rejection problems need their own components in the model',
   );
 }
@@ -578,7 +873,7 @@ section('semantic: UPS energy behaves correctly through a utility loss');
   const lostLater = supplyState({ ...base, gridLost: true, secondsOnBattery: 120 });
   ok(lostLater.batteryKwh < lostNoGen.batteryKwh, 'energy must keep falling as time on battery increases');
 
-  const fullAutonomy = (SUPPLY_ASSUMPTIONS.batteryKwh * 60) / INPUTS.itCapacityMW;
+  const fullAutonomy = (SUPPLY_ASSUMPTIONS.batteryKwh * 60) / derived.itCapacityMW;
   ok(
     lostNoGen.autonomyMinutes < fullAutonomy,
     'autonomy must shrink as the battery drains',
@@ -637,22 +932,22 @@ section('semantic: a commissioned rack requires its power and cooling systems');
     };
     walk(pkgId);
   };
-  completeClosure('M1-W.IT');
-  ok(componentCxStatus(cx, 'M1-W.rack').status === 'complete', 'full closure should complete the rack');
+  completeClosure('CLN1.h1.IT');
+  ok(componentCxStatus(cx, 'CLN1.h1.rack').status === 'complete', 'full closure should complete the rack');
   /* now delete the cooling package and it must stop being complete */
-  delete cx['M1-W.COOL'];
+  delete cx['CLN1.h1.COOL'];
   ok(
-    componentCxStatus(cx, 'M1-W.rack').status !== 'complete',
+    componentCxStatus(cx, 'CLN1.h1.rack').status !== 'complete',
     'removing the cooling package must stop the rack being commissioned',
   );
   ok(
-    componentCxStatus(cx, 'M1-W.rack').blocking.some((b) => /cooling distribution/i.test(b.message)),
+    componentCxStatus(cx, 'CLN1.h1.rack').blocking.some((b) => /cooling distribution/i.test(b.message)),
     'the blocker must name the cooling package',
   );
-  delete cx['M1-W.PWR'];
+  delete cx['CLN1.h1.PWR'];
   ok(
-    componentCxStatus(cx, 'M1-W.rack').blocking.some((b) => /power train/i.test(b.message)),
-    'the blocker must name the power package',
+    componentCxStatus(cx, 'CLN1.h1.rack').blocking.some((b) => /power distribution|electrical rooms/i.test(b.message)),
+    'the blocker must name the building electrical package',
   );
 }
 
@@ -684,43 +979,94 @@ section('semantic: every PUBLIC FACT statement carries a public source');
 section('semantic: rack archetypes and the calculation chain');
 {
   ok(RACK_ARCHETYPES.length === 3, 'expected three rack archetypes');
+  const hallCount = INPUTS.buildingCount * INPUTS.hallsPerBuilding;
   for (const a of RACK_ARCHETYPES) {
-    const c = chainFor(a);
+    const c = chainFor(a.id);
     ok(c.racksTotal > 0, `archetype ${a.id} produced no racks`);
     ok(
-      c.racksPerHall === Math.round(c.racksTotal / 6),
-      `archetype ${a.id}: racks per hall must be a sixth of the campus total`,
+      c.racksPerHall * hallCount >= c.racksTotal,
+      `archetype ${a.id}: racks per hall must cover the campus total across ${hallCount} halls`,
     );
     ok(
-      Math.abs(c.heatToRejectMw - INPUTS.itCapacityMW) < 1e-6,
+      Math.abs(c.heatToRejectMw - derived.itCapacityMW) < 1e-6,
       `archetype ${a.id}: heat rejected must equal the IT load`,
     );
-    ok(c.compressorLoadMw >= 0, `archetype ${a.id}: compressor load must be non-negative`);
+    /* Heat splits between liquid and air, and the split must add up. This is the
+       90/10 split that means in-hall air cooling cannot be removed in a retrofit. */
+    ok(
+      Math.abs(c.heatToLiquidMw + c.heatToAirMw - c.heatToRejectMw) < 1e-6,
+      `archetype ${a.id}: liquid and air heat must sum to the total rejected`,
+    );
     ok(c.buswayCurrentPerRackA > 0, `archetype ${a.id}: busway current must be positive`);
     ok(
-      Math.abs(c.coolingWaterM3Yr - INPUTS.coolingDemandM3Yr) / INPUTS.coolingDemandM3Yr < 0.25,
-      `archetype ${a.id}: water must stay near the published campus figure, got ${c.coolingWaterM3Yr}`,
+      c.buswayCurrentPerRackEdbpA >= c.buswayCurrentPerRackA,
+      `archetype ${a.id}: busway must be provisioned to the worst case, not the operating case`,
     );
+    ok(
+      c.coolingWaterM3Yr >= 0 && Number.isFinite(c.coolingWaterM3Yr),
+      `archetype ${a.id}: water figure must be a finite non-negative number, got ${c.coolingWaterM3Yr}`,
+    );
+    /* Only a liquid-dominant design uses site water at all. */
+    if (c.coolingToLiquidShare === 0) {
+      ok(c.coolingWaterM3Yr === 0, `archetype ${a.id} is air-only, so it should use no cooling water`);
+      ok(c.coolantFlowLPerMinPerRack === 0, `archetype ${a.id} is air-only, so it needs no coolant flow`);
+    } else {
+      ok(c.coolantFlowLPerMinPerRack > 0, `archetype ${a.id} is liquid-cooled and needs a coolant flow`);
+    }
     ok(a.limitingFactors.length > 0, `archetype ${a.id} should say what limits it`);
-    ok(a.classification === 'TYPICAL', `archetype ${a.id} parameters are typical, not fact`);
+    /* The delivered design is derived from Clonee's own published figures, so it
+       is DERIVED; the two comparators are published industry practice. */
+    ok(
+      a.classification === 'DERIVED' || a.classification === 'TYPICAL',
+      `archetype ${a.id} classification must be DERIVED or TYPICAL, not fact`,
+    );
+    ok(
+      a.id === 'clonee-delivered' ? a.classification === 'DERIVED' : a.classification === 'TYPICAL',
+      `archetype ${a.id} has the wrong classification for its relationship to Clonee`,
+    );
   }
-  /* denser racks must mean fewer racks, and more cooling plant */
-  const conv = chainFor(RACK_ARCHETYPES[0]);
-  const ai = chainFor(RACK_ARCHETYPES[2]);
-  ok(ai.racksTotal < conv.racksTotal, 'a denser archetype must need fewer racks');
-  ok(
-    ai.compressorLoadMw < conv.compressorLoadMw,
-    'a liquid-dominant archetype must imply less compressor load at the same IT load',
-  );
+  /* The archetype the campus actually has must reproduce the modelled campus:
+     720 racks per hall at about 12.5 kW. If this drifts, the 3D model and the
+     archetype panel have stopped agreeing. */
+  {
+    const delivered = chainFor('clonee-delivered');
+    ok(
+      Math.abs(delivered.rackDensityKw - INPUTS.deliveredRackKw) < 3,
+      `the delivered archetype should sit near ${INPUTS.deliveredRackKw} kW per rack, got ${delivered.rackDensityKw}`,
+    );
+    ok(
+      Math.abs((INPUTS.itMwPerBuilding / INPUTS.hallsPerBuilding) * 1000 / RACKS_PER_HALL - INPUTS.deliveredRackKw) /
+        INPUTS.deliveredRackKw < 0.06,
+      'the modelled 3D rack density and the delivered archetype must agree',
+    );
+    ok(delivered.coolingToLiquidShare === 0, 'the delivered campus is air-cooled and has no liquid share');
+  }
+  /* Denser racks must mean fewer racks for the same IT load, more heat to air at
+     intermediate densities, and more fabric ports. */
+  const conv = chainFor('clonee-delivered');
+  const modern = chainFor('modern-air');
+  const ai = chainFor('ai-liquid');
+  ok(ai.racksTotal < modern.racksTotal && modern.racksTotal < conv.racksTotal, 'denser archetypes must need fewer racks');
+  ok(ai.coolingToLiquidShare > modern.coolingToLiquidShare, 'the AI archetype must capture more heat in liquid');
   ok(
     Math.abs(ai.heatToRejectMw - conv.heatToRejectMw) < 1e-6,
     'heat rejected is a function of IT load, not of rack density',
   );
-  ok(ai.networkPortsPerRack > conv.networkPortsPerRack, 'a denser archetype must imply more fabric ports');
+  ok(ai.networkPortsPerRack > modern.networkPortsPerRack, 'a denser archetype must imply more fabric ports');
+  /* The headline finding: the supply funds a small fraction of the physical
+     rack positions. This is the whole point of the AI panel. */
+  ok(
+    ai.rackPositionUtilisationPct < conv.rackPositionUtilisationPct,
+    'the denser AI design must fund a smaller share of the physical rack positions',
+  );
+  ok(
+    ai.rackPositionUtilisationPct < 25,
+    `the AI retrofit should fund under a quarter of the rack positions, got ${ai.rackPositionUtilisationPct.toFixed(1)}%`,
+  );
   ok(NETWORK_LAYERS.length >= 4, 'the network should be explained in layers');
   ok(
-    NETWORK_LAYERS.some((l) => /east-west/i.test(l.name)),
-    'the east-west fabric must be called out as its own layer',
+    NETWORK_LAYERS.some((l) => /top-of-rack|hall fabric/i.test(l.name)),
+    'the rack-level fabric must be called out as its own layer',
   );
   ok(
     NETWORK_LAYERS.every((l) => l.limitingFactors.length > 0),
